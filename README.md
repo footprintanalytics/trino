@@ -19,6 +19,11 @@
    </a>
 </p>
 
+## Mysql Connector Adaptation to Apache Doris
+
+add `mysql.datetime-column-size` config for Doris
+
+
 ## Development
 
 See [DEVELOPMENT](.github/DEVELOPMENT.md) for information about code style,
@@ -52,6 +57,29 @@ Trino has a comprehensive set of tests that take a considerable amount of time
 to run, and are thus disabled by the above command. These tests are run by the
 CI system when you submit a pull request. We recommend only running tests
 locally for the areas of code that you change.
+
+## Building Mysql Connector Only
+
+```shell
+cd ./plugin/trino-mysql
+
+../../mvnw clean install -DskipTests
+```
+
+the `./plugin/trino-mysql/target/trino-mysql-405.jar` file 
+is what we need to replace the mysql connector in Trino 
+
+see [trino-doris-demo](https://github.com/myfjdthink/trino-doris-demo) to get runnable example
+
+## Build in Docker
+```shell
+docker run -it --rm \
+-v {trino_code_path}:/opt/trino \
+-v ~/.m2:/root/.m2 \
+--name build_java openjdk:20-rc-jdk-buster bash
+```
+
+volume .m2 folder re-downloading dependencies in Docker
 
 ## Running Trino in your IDE
 
