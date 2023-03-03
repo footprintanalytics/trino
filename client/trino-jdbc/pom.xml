@@ -5,7 +5,7 @@
     <parent>
         <groupId>io.trino</groupId>
         <artifactId>trino-root</artifactId>
-        <version>405</version>
+        <version>409-SNAPSHOT</version>
         <relativePath>../../pom.xml</relativePath>
     </parent>
 
@@ -221,12 +221,6 @@
         </dependency>
 
         <dependency>
-            <groupId>javax.servlet</groupId>
-            <artifactId>javax.servlet-api</artifactId>
-            <scope>test</scope>
-        </dependency>
-
-        <dependency>
             <groupId>javax.ws.rs</groupId>
             <artifactId>javax.ws.rs-api</artifactId>
             <scope>test</scope>
@@ -235,6 +229,12 @@
         <dependency>
             <groupId>org.assertj</groupId>
             <artifactId>assertj-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.eclipse.jetty.toolchain</groupId>
+            <artifactId>jetty-servlet-api</artifactId>
             <scope>test</scope>
         </dependency>
 
@@ -356,8 +356,8 @@
                                     <shadedPattern>${shadeBase}.okio</shadedPattern>
                                 </relocation>
                                 <relocation>
-                                    <pattern>net.jodah.failsafe</pattern>
-                                    <shadedPattern>${shadeBase}.net.jodah.failsafe</shadedPattern>
+                                    <pattern>dev.failsafe</pattern>
+                                    <shadedPattern>${shadeBase}.dev.failsafe</shadedPattern>
                                 </relocation>
                             </relocations>
                             <filters>

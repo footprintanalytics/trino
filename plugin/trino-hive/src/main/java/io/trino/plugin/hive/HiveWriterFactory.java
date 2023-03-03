@@ -48,14 +48,11 @@ import io.trino.spi.type.Type;
 import io.trino.spi.type.TypeManager;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
-import org.apache.hadoop.hive.common.FileUtils;
 import org.apache.hadoop.hive.conf.HiveConf;
-import org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat;
-import org.apache.hadoop.hive.ql.io.IOConstants;
 import org.apache.hadoop.io.compress.CompressionCodec;
 import org.apache.hadoop.io.compress.DefaultCodec;
 import org.apache.hadoop.mapred.JobConf;
-import org.apache.hive.common.util.ReflectionUtil;
+import org.apache.hadoop.util.ReflectionUtils;
 import org.joda.time.DateTimeZone;
 
 import java.io.IOException;
@@ -98,11 +95,18 @@ import static io.trino.plugin.hive.LocationHandle.WriteMode.DIRECT_TO_TARGET_EXI
 import static io.trino.plugin.hive.acid.AcidOperation.CREATE_TABLE;
 import static io.trino.plugin.hive.metastore.MetastoreUtil.getHiveSchema;
 import static io.trino.plugin.hive.metastore.StorageFormat.fromHiveStorageFormat;
+import static io.trino.plugin.hive.util.AcidTables.deltaSubdir;
+import static io.trino.plugin.hive.util.AcidTables.isFullAcidTable;
+import static io.trino.plugin.hive.util.AcidTables.isInsertOnlyTable;
 import static io.trino.plugin.hive.util.CompressionConfigUtil.assertCompressionConfigured;
 import static io.trino.plugin.hive.util.CompressionConfigUtil.configureCompression;
+import static io.trino.plugin.hive.util.HiveClassNames.HIVE_IGNORE_KEY_OUTPUT_FORMAT_CLASS;
 import static io.trino.plugin.hive.util.HiveUtil.getColumnNames;
 import static io.trino.plugin.hive.util.HiveUtil.getColumnTypes;
+import static io.trino.plugin.hive.util.HiveUtil.makePartName;
 import static io.trino.plugin.hive.util.HiveWriteUtils.createPartitionValues;
+import static io.trino.plugin.hive.util.SerdeConstants.LIST_COLUMNS;
+import static io.trino.plugin.hive.util.SerdeConstants.LIST_COLUMN_TYPES;
 import static io.trino.spi.connector.SortOrder.ASC_NULLS_FIRST;
 import static io.trino.spi.type.BigintType.BIGINT;
 import static io.trino.spi.type.IntegerType.INTEGER;
@@ -115,10 +119,6 @@ import static java.util.stream.Collectors.joining;
 import static java.util.stream.Collectors.toList;
 import static java.util.stream.Collectors.toMap;
 import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.COMPRESSRESULT;
-import static org.apache.hadoop.hive.ql.io.AcidUtils.deleteDeltaSubdir;
-import static org.apache.hadoop.hive.ql.io.AcidUtils.deltaSubdir;
-import static org.apache.hadoop.hive.ql.io.AcidUtils.isFullAcidTable;
-import static org.apache.hadoop.hive.ql.io.AcidUtils.isInsertOnlyTable;
 
 public class HiveWriterFactory
 {
@@ -317,7 +317,7 @@ public class HiveWriterFactory
 
         Optional<String> partitionName;
         if (!partitionColumnNames.isEmpty()) {
-            partitionName = Optional.of(FileUtils.makePartName(partitionColumnNames, partitionValues));
+            partitionName = Optional.of(makePartName(partitionColumnNames, partitionValues));
         }
         else {
             partitionName = Optional.empty();
@@ -340,10 +340,10 @@ public class HiveWriterFactory
                 //           or a new unpartitioned table.
                 updateMode = UpdateMode.NEW;
                 schema = new Properties();
-                schema.setProperty(IOConstants.COLUMNS, dataColumns.stream()
+                schema.setProperty(LIST_COLUMNS, dataColumns.stream()
                         .map(DataColumn::getName)
                         .collect(joining(",")));
-                schema.setProperty(IOConstants.COLUMNS_TYPES, dataColumns.stream()
+                schema.setProperty(LIST_COLUMN_TYPES, dataColumns.stream()
                         .map(DataColumn::getHiveType)
                         .map(HiveType::getHiveTypeName)
                         .map(HiveTypeName::toString)
@@ -716,11 +716,8 @@ public class HiveWriterFactory
         switch (transaction.getOperation()) {
             case INSERT:
             case CREATE_TABLE:
-                return deltaSubdir(writeId, writeId, 0);
-            case DELETE:
-                return deleteDeltaSubdir(writeId, writeId, 0);
             case MERGE:
-                return deltaSubdir(writeId, writeId, 0);
+                return deltaSubdir(writeId, 0);
             default:
                 throw new UnsupportedOperationException("transaction operation is " + transaction.getOperation());
         }
@@ -784,7 +781,7 @@ public class HiveWriterFactory
     public static String getFileExtension(JobConf conf, StorageFormat storageFormat)
     {
         // text format files must have the correct extension when compressed
-        if (!HiveConf.getBoolVar(conf, COMPRESSRESULT) || !HiveIgnoreKeyTextOutputFormat.class.getName().equals(storageFormat.getOutputFormat())) {
+        if (!HiveConf.getBoolVar(conf, COMPRESSRESULT) || !HIVE_IGNORE_KEY_OUTPUT_FORMAT_CLASS.equals(storageFormat.getOutputFormat())) {
             return "";
         }
 
@@ -795,7 +792,7 @@ public class HiveWriterFactory
 
         try {
             Class<? extends CompressionCodec> codecClass = conf.getClassByName(compressionCodecClass).asSubclass(CompressionCodec.class);
-            return ReflectionUtil.newInstance(codecClass, conf).getDefaultExtension();
+            return ReflectionUtils.newInstance(codecClass, conf).getDefaultExtension();
         }
         catch (ClassNotFoundException e) {
             throw new TrinoException(HIVE_UNSUPPORTED_FORMAT, "Compression codec not found: " + compressionCodecClass, e);

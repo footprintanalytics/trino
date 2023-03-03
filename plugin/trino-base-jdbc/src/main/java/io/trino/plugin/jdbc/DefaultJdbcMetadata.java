@@ -61,6 +61,7 @@ import io.trino.spi.security.AccessDeniedException;
 import io.trino.spi.security.TrinoPrincipal;
 import io.trino.spi.statistics.ComputedStatistics;
 import io.trino.spi.statistics.TableStatistics;
+import io.trino.spi.type.Type;
 
 import java.sql.Types;
 import java.util.ArrayList;
@@ -821,22 +822,6 @@ public class DefaultJdbcMetadata
     }
 
     @Override
-    public ColumnHandle getDeleteRowIdColumnHandle(ConnectorSession session, ConnectorTableHandle tableHandle)
-    {
-        // The column is used for row-level delete, which is not supported, but it's required during analysis anyway.
-        return new JdbcColumnHandle(
-                DELETE_ROW_ID,
-                new JdbcTypeHandle(Types.BIGINT, Optional.of("bigint"), Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty()),
-                BIGINT);
-    }
-
-    @Override
-    public ConnectorTableHandle beginDelete(ConnectorSession session, ConnectorTableHandle tableHandle, RetryMode retryMode)
-    {
-        throw new TrinoException(NOT_SUPPORTED, MODIFYING_ROWS_MESSAGE);
-    }
-
-    @Override
     public ColumnHandle getMergeRowIdColumnHandle(ConnectorSession session, ConnectorTableHandle tableHandle)
     {
         // The column is used for row-level merge, which is not supported, but it's required during analysis anyway.
@@ -905,6 +890,15 @@ public class DefaultJdbcMetadata
         JdbcColumnHandle columnHandle = (JdbcColumnHandle) column;
         verify(!tableHandle.isSynthetic(), "Not a table reference: %s", tableHandle);
         jdbcClient.renameColumn(session, tableHandle, columnHandle, target);
+    }
+
+    @Override
+    public void setColumnType(ConnectorSession session, ConnectorTableHandle table, ColumnHandle column, Type type)
+    {
+        JdbcTableHandle tableHandle = (JdbcTableHandle) table;
+        JdbcColumnHandle columnHandle = (JdbcColumnHandle) column;
+        verify(!tableHandle.isSynthetic(), "Not a table reference: %s", tableHandle);
+        jdbcClient.setColumnType(session, tableHandle, columnHandle, type);
     }
 
     @Override

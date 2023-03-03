@@ -18,6 +18,7 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableMultiset;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Multiset;
+import io.trino.plugin.jdbc.logging.RemoteQueryModifier;
 import io.trino.spi.connector.ColumnHandle;
 import io.trino.spi.connector.ConnectorSession;
 import io.trino.spi.connector.JoinCondition;
@@ -53,6 +54,7 @@ import java.util.Optional;
 import java.util.function.Function;
 import java.util.stream.LongStream;
 
+import static com.google.common.base.Strings.padEnd;
 import static com.google.common.collect.ImmutableList.toImmutableList;
 import static io.airlift.slice.Slices.utf8Slice;
 import static io.airlift.testing.Assertions.assertContains;
@@ -102,7 +104,7 @@ public class TestDefaultJdbcQueryBuilder
     private TestingDatabase database;
     private JdbcClient jdbcClient;
 
-    private final QueryBuilder queryBuilder = new DefaultQueryBuilder();
+    private final QueryBuilder queryBuilder = new DefaultQueryBuilder(RemoteQueryModifier.NONE);
 
     private List<JdbcColumnHandle> columns;
 
@@ -396,7 +398,12 @@ public class TestDefaultJdbcQueryBuilder
                     builder.add((String) resultSet.getObject("col_11"));
                 }
             }
-            assertEquals(builder.build(), ImmutableSet.of("test_str_700", "test_str_701", "test_str_180", "test_str_196"));
+
+            assertThat(builder.build()).containsOnly(
+                    padEnd("test_str_180", 128, ' '),
+                    padEnd("test_str_700", 128, ' '),
+                    padEnd("test_str_701", 128, ' '),
+                    padEnd("test_str_196", 128, ' '));
 
             assertContains(preparedStatement.toString(), "\"col_11\" >= ?");
             assertContains(preparedStatement.toString(), "\"col_11\" < ?");

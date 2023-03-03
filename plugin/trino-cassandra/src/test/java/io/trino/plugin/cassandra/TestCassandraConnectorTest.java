@@ -18,14 +18,15 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.primitives.Ints;
 import io.airlift.units.Duration;
 import io.trino.Session;
+import io.trino.sql.planner.plan.FilterNode;
 import io.trino.testing.BaseConnectorTest;
 import io.trino.testing.Bytes;
 import io.trino.testing.MaterializedResult;
 import io.trino.testing.MaterializedRow;
 import io.trino.testing.QueryRunner;
 import io.trino.testing.TestingConnectorBehavior;
-import io.trino.testing.assertions.Assert;
 import io.trino.testing.sql.TestTable;
+import org.intellij.lang.annotations.Language;
 import org.testng.SkipException;
 import org.testng.annotations.AfterClass;
 import org.testng.annotations.Test;
@@ -63,6 +64,7 @@ import static io.trino.testing.MaterializedResult.DEFAULT_PRECISION;
 import static io.trino.testing.MaterializedResult.resultBuilder;
 import static io.trino.testing.QueryAssertions.assertContains;
 import static io.trino.testing.QueryAssertions.assertContainsEventually;
+import static io.trino.testing.TestingNames.randomNameSuffix;
 import static io.trino.type.IpAddressType.IPADDRESS;
 import static java.lang.String.format;
 import static java.util.Comparator.comparing;
@@ -71,6 +73,7 @@ import static java.util.stream.Collectors.toList;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.testng.Assert.assertEquals;
+import static org.testng.Assert.assertFalse;
 
 public class TestCassandraConnectorTest
         extends BaseConnectorTest
@@ -101,6 +104,7 @@ public class TestCassandraConnectorTest
 
             case SUPPORTS_ADD_COLUMN:
             case SUPPORTS_RENAME_COLUMN:
+            case SUPPORTS_SET_COLUMN_TYPE:
                 return false;
 
             case SUPPORTS_COMMENT_ON_TABLE:
@@ -190,28 +194,13 @@ public class TestCassandraConnectorTest
     @Override
     public void testShowColumns()
     {
-        MaterializedResult actual = computeActual("SHOW COLUMNS FROM orders");
-
-        MaterializedResult expectedParametrizedVarchar = resultBuilder(getSession(), VARCHAR, VARCHAR, VARCHAR, VARCHAR)
-                .row("orderkey", "bigint", "", "")
-                .row("custkey", "bigint", "", "")
-                .row("orderstatus", "varchar", "", "")
-                .row("totalprice", "double", "", "")
-                .row("orderdate", "date", "", "")
-                .row("orderpriority", "varchar", "", "")
-                .row("clerk", "varchar", "", "")
-                .row("shippriority", "integer", "", "")
-                .row("comment", "varchar", "", "")
-                .build();
-
-        Assert.assertEquals(actual, expectedParametrizedVarchar);
+        assertThat(query("SHOW COLUMNS FROM orders")).matches(getDescribeOrdersResult());
     }
 
-    @Test
     @Override
-    public void testDescribeTable()
+    protected MaterializedResult getDescribeOrdersResult()
     {
-        MaterializedResult expectedColumns = resultBuilder(getSession(), VARCHAR, VARCHAR, VARCHAR, VARCHAR)
+        return resultBuilder(getSession(), VARCHAR, VARCHAR, VARCHAR, VARCHAR)
                 .row("orderkey", "bigint", "", "")
                 .row("custkey", "bigint", "", "")
                 .row("orderstatus", "varchar", "", "")
@@ -222,8 +211,6 @@ public class TestCassandraConnectorTest
                 .row("shippriority", "integer", "", "")
                 .row("comment", "varchar", "", "")
                 .build();
-        MaterializedResult actualColumns = computeActual("DESCRIBE orders");
-        Assert.assertEquals(actualColumns, expectedColumns);
     }
 
     @Test
@@ -993,6 +980,63 @@ public class TestCassandraConnectorTest
     }
 
     @Test
+    public void testUserDefinedTypeInArray()
+    {
+        String tableName = "test_udt_in_array" + randomNameSuffix();
+        String userDefinedTypeName = "test_udt" + randomNameSuffix();
+
+        session.execute("CREATE TYPE tpch." + userDefinedTypeName + "(udt_field bigint)");
+        session.execute("CREATE TABLE tpch." + tableName + "(id bigint, col list<frozen<tpch." + userDefinedTypeName + ">>, primary key (id))");
+        session.execute("INSERT INTO tpch." + tableName + "(id, col) values (1, [{udt_field: 10}])");
+        assertContainsEventually(() -> execute("SHOW TABLES FROM cassandra.tpch"), resultBuilder(getSession(), VARCHAR)
+                .row(tableName)
+                .build(), new Duration(1, MINUTES));
+
+        assertQuery("SELECT * FROM " + tableName, "VALUES (1, '[\"{udt_field:10}\"]')");
+
+        session.execute("DROP TABLE tpch." + tableName);
+        session.execute("DROP TYPE tpch." + userDefinedTypeName);
+    }
+
+    @Test
+    public void testUserDefinedTypeInMap()
+    {
+        String tableName = "test_udt_in_map" + randomNameSuffix();
+        String userDefinedTypeName = "test_udt" + randomNameSuffix();
+
+        session.execute("CREATE TYPE tpch." + userDefinedTypeName + "(udt_field bigint)");
+        session.execute("CREATE TABLE tpch." + tableName + "(id bigint, col map<frozen<tpch." + userDefinedTypeName + ">, frozen<tpch." + userDefinedTypeName + ">>, primary key (id))");
+        session.execute("INSERT INTO tpch." + tableName + "(id, col) values (1, {{udt_field: 10}: {udt_field: -10}})");
+        assertContainsEventually(() -> execute("SHOW TABLES FROM cassandra.tpch"), resultBuilder(getSession(), VARCHAR)
+                .row(tableName)
+                .build(), new Duration(1, MINUTES));
+
+        assertQuery("SELECT * FROM " + tableName, "VALUES (1, '{\"{udt_field:10}\":\"{udt_field:-10}\"}')");
+
+        session.execute("DROP TABLE tpch." + tableName);
+        session.execute("DROP TYPE tpch." + userDefinedTypeName);
+    }
+
+    @Test
+    public void testUserDefinedTypeInSet()
+    {
+        String tableName = "test_udt_in_set" + randomNameSuffix();
+        String userDefinedTypeName = "test_udt" + randomNameSuffix();
+
+        session.execute("CREATE TYPE tpch." + userDefinedTypeName + "(udt_field bigint)");
+        session.execute("CREATE TABLE tpch." + tableName + "(id bigint, col set<frozen<tpch." + userDefinedTypeName + ">>, primary key (id))");
+        session.execute("INSERT INTO tpch." + tableName + "(id, col) values (1, {{udt_field: 10}})");
+        assertContainsEventually(() -> execute("SHOW TABLES FROM cassandra.tpch"), resultBuilder(getSession(), VARCHAR)
+                .row(tableName)
+                .build(), new Duration(1, MINUTES));
+
+        assertQuery("SELECT * FROM " + tableName, "VALUES (1, '[\"{udt_field:10}\"]')");
+
+        session.execute("DROP TABLE tpch." + tableName);
+        session.execute("DROP TYPE tpch." + userDefinedTypeName);
+    }
+
+    @Test
     public void testUnsupportedColumnType()
     {
         // TODO currently all standard types are supported to some extent. We should add a test with custom type if possible.
@@ -1325,6 +1369,107 @@ public class TestCassandraConnectorTest
                 .hasStackTraceContaining("Delete without primary key or partition key is not supported");
     }
 
+    // test polymorphic table function
+
+    @Test
+    public void testNativeQuerySelectFromNation()
+    {
+        assertQuery(
+                "SELECT * FROM TABLE(cassandra.system.query(query => 'SELECT name FROM tpch.nation WHERE nationkey = 0 ALLOW FILTERING'))",
+                "VALUES 'ALGERIA'");
+        assertQuery(
+                "SELECT name FROM TABLE(cassandra.system.query(query => 'SELECT * FROM tpch.nation WHERE nationkey = 0 ALLOW FILTERING'))",
+                "VALUES 'ALGERIA'");
+        assertQuery(
+                "SELECT name FROM TABLE(cassandra.system.query(query => 'SELECT * FROM tpch.nation')) WHERE nationkey = 0",
+                "VALUES 'ALGERIA'");
+        assertThat(query("SELECT * FROM TABLE(cassandra.system.query(query => 'SELECT * FROM tpch.nation')) WHERE nationkey = 0"))
+                .isNotFullyPushedDown(FilterNode.class);
+    }
+
+    @Test
+    public void testNativeQuerySelectFromTestTable()
+    {
+        String tableName = "tpch.test_select" + randomNameSuffix();
+        onCassandra("CREATE TABLE " + tableName + "(col BIGINT PRIMARY KEY)");
+
+        onCassandra("INSERT INTO " + tableName + "(col) VALUES (1)");
+        assertQuery(
+                "SELECT * FROM TABLE(cassandra.system.query(query => 'SELECT * FROM " + tableName + "'))",
+                "VALUES 1");
+
+        onCassandra("DROP TABLE " + tableName);
+    }
+
+    @Test
+    public void testNativeQueryCaseSensitivity()
+    {
+        String tableName = "tpch.test_case" + randomNameSuffix();
+        onCassandra("CREATE TABLE " + tableName + "(col_case BIGINT PRIMARY KEY, \"COL_CASE\" BIGINT)");
+
+        onCassandra("INSERT INTO " + tableName + "(col_case, \"COL_CASE\") VALUES (1, 2)");
+        assertQuery(
+                "SELECT * FROM TABLE(cassandra.system.query(query => 'SELECT * FROM " + tableName + "'))",
+                "VALUES (1, 2)");
+
+        onCassandra("DROP TABLE " + tableName);
+    }
+
+    @Test
+    public void testNativeQueryCreateTableFailure()
+    {
+        String tableName = "test_create" + randomNameSuffix();
+        assertFalse(getQueryRunner().tableExists(getSession(), tableName));
+        assertThatThrownBy(() -> query("SELECT * FROM TABLE(cassandra.system.query(query => 'CREATE TABLE tpch." + tableName + "(col INT PRIMARY KEY)'))"))
+                .hasMessage("Handle doesn't have columns info");
+        assertFalse(getQueryRunner().tableExists(getSession(), tableName));
+    }
+
+    @Test
+    public void testNativeQueryPreparingStatementFailure()
+    {
+        String tableName = "test_insert" + randomNameSuffix();
+        assertFalse(getQueryRunner().tableExists(getSession(), tableName));
+        assertThatThrownBy(() -> query("SELECT * FROM TABLE(cassandra.system.query(query => 'INSERT INTO tpch." + tableName + "(col) VALUES (1)'))"))
+                .hasMessageContaining("unconfigured table");
+    }
+
+    @Test
+    public void testNativeQueryUnsupportedStatement()
+    {
+        String tableName = "test_unsupported_statement" + randomNameSuffix();
+        onCassandra("CREATE TABLE tpch." + tableName + "(col INT PRIMARY KEY)");
+        onCassandra("INSERT INTO tpch." + tableName + "(col) VALUES (1)");
+
+        assertThatThrownBy(() -> query("SELECT * FROM TABLE(cassandra.system.query(query => 'INSERT INTO tpch." + tableName + "(col) VALUES (3)'))"))
+                .hasMessage("Handle doesn't have columns info");
+        assertThatThrownBy(() -> query("SELECT * FROM TABLE(cassandra.system.query(query => 'DELETE FROM tpch." + tableName + " WHERE col = 1'))"))
+                .hasMessage("Handle doesn't have columns info");
+
+        assertQuery("SELECT * FROM " + tableName, "VALUES 1");
+
+        onCassandra("DROP TABLE IF EXISTS tpch." + tableName);
+    }
+
+    @Test
+    public void testNativeQueryUnsupportedType()
+    {
+        String tableName = "test_unsupported_type" + randomNameSuffix();
+        onCassandra("CREATE TABLE tpch." + tableName + "(col TIME PRIMARY KEY)");
+
+        assertThatThrownBy(() -> query("SELECT * FROM TABLE(cassandra.system.query(query => 'SELECT * FROM tpch." + tableName + "'))"))
+                .hasMessage("Unsupported type: TIME");
+
+        onCassandra("DROP TABLE IF EXISTS tpch." + tableName);
+    }
+
+    @Test
+    public void testNativeQueryIncorrectSyntax()
+    {
+        assertThatThrownBy(() -> query("SELECT * FROM TABLE(system.query(query => 'some wrong syntax'))"))
+                .hasMessageContaining("no viable alternative at input 'some'");
+    }
+
     @Override
     protected OptionalInt maxColumnNameLength()
     {
@@ -1431,5 +1576,10 @@ public class TestCassandraConnectorTest
     private TestCassandraTable testTable(String namePrefix, List<TestCassandraTable.ColumnDefinition> columnDefinitions, List<String> rowsToInsert)
     {
         return new TestCassandraTable(session::execute, server, KEYSPACE, namePrefix, columnDefinitions, rowsToInsert);
+    }
+
+    private void onCassandra(@Language("SQL") String sql)
+    {
+        session.execute(sql);
     }
 }

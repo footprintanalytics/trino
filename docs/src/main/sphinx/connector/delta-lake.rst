@@ -35,14 +35,14 @@ The connector recognizes Delta tables created in the metastore by the Databricks
 runtime. If non-Delta tables are present in the metastore, as well, they are not
 visible to the connector.
 
-To configure the Delta Lake connector, create a catalog properties file, for
-example ``etc/catalog/delta.properties``, that references the ``delta-lake``
+To configure the Delta Lake connector, create a catalog properties file
+``etc/catalog/example.properties`` that references the ``delta_lake``
 connector. Update the ``hive.metastore.uri`` with the URI of your Hive metastore
 Thrift service:
 
 .. code-block:: properties
 
-    connector.name=delta-lake
+    connector.name=delta_lake
     hive.metastore.uri=thrift://example.net:9083
 
 If you are using AWS Glue as Hive metastore, you can simply set the metastore to
@@ -50,7 +50,7 @@ If you are using AWS Glue as Hive metastore, you can simply set the metastore to
 
 .. code-block:: properties
 
-    connector.name=delta-lake
+    connector.name=delta_lake
     hive.metastore=glue
 
 The Delta Lake connector reuses certain functionalities from the Hive connector,
@@ -100,7 +100,6 @@ values. Typical usage does not require you to configure them.
 
         * ``NONE``
         * ``SNAPPY``
-        * ``LZ4``
         * ``ZSTD``
         * ``GZIP``
       - ``SNAPPY``
@@ -217,16 +216,21 @@ connector.
       - A decimal value in the range (0, 1] used as a minimum for weights assigned to each split. A low value may improve performance
         on tables with small files. A higher value may improve performance for queries with highly skewed aggregations or joins.
       - 0.05
-    * - ``parquet.optimized-writer.enabled``
-      - Whether the optimized writer should be used when writing Parquet files.
-        The equivalent catalog session property is
-        ``parquet_optimized_writer_enabled``.
-      - ``true``
+    * - ``parquet.max-read-block-row-count``
+      - Sets the maximum number of rows read in a batch.
+      - ``8192``
     * - ``parquet.optimized-reader.enabled``
       - Whether batched column readers should be used when reading Parquet files
         for improved performance. Set this property to ``false`` to disable the
         optimized parquet reader by default. The equivalent catalog session
         property is ``parquet_optimized_reader_enabled``.
+      - ``true``
+    * - ``parquet.optimized-nested-reader.enabled``
+      - Whether batched column readers should be used when reading ARRAY, MAP
+        and ROW types from Parquet files for improved performance. Set this
+        property to ``false`` to disable the optimized parquet reader by default
+        for structural data types. The equivalent catalog session property is
+        ``parquet_optimized_nested_reader_enabled``.
       - ``true``
 
 The following table describes :ref:`catalog session properties
@@ -240,9 +244,6 @@ configure processing of Parquet files.
     * - Property name
       - Description
       - Default
-    * - ``parquet_optimized_writer_enabled``
-      - Whether the optimized writer should be used when writing Parquet files.
-      - ``true``
     * - ``parquet_optimized_reader_enabled``
       - Whether batched column readers should be used when reading Parquet files
         for improved performance.
@@ -501,14 +502,14 @@ You can create a schema with the :doc:`/sql/create-schema` statement and the
 subdirectory under the schema location. Data files for tables in this schema
 using the default location are cleaned up if the table is dropped::
 
-  CREATE SCHEMA delta.my_schema
+  CREATE SCHEMA example.example_schema
   WITH (location = 's3://my-bucket/a/path');
 
 Optionally, the location can be omitted. Tables in this schema must have a
 location included when you create them. The data files for these tables are not
 removed if the table is dropped::
 
-  CREATE SCHEMA delta.my_schema;
+  CREATE SCHEMA example.example_schema;
 
 .. _delta-lake-create-table:
 
@@ -518,7 +519,7 @@ Creating tables
 When Delta tables exist in storage, but not in the metastore, Trino can be used
 to register them::
 
-  CREATE TABLE delta.default.my_table (
+  CREATE TABLE example.default.example_table (
     dummy bigint
   )
   WITH (
@@ -541,12 +542,12 @@ If the specified location does not already contain a Delta table, the connector
 automatically writes the initial transaction log entries and registers the table
 in the metastore. As a result, any Databricks engine can write to the table::
 
-   CREATE TABLE delta.default.new_table (id bigint, address varchar);
+   CREATE TABLE example.default.new_table (id bigint, address varchar);
 
 The Delta Lake connector also supports creating tables using the :doc:`CREATE
 TABLE AS </sql/create-table-as>` syntax.
 
-There are three table properties available for use in table creation.
+The following properties are available for use:
 
 .. list-table:: Delta Lake table properties
   :widths: 40, 60
@@ -560,14 +561,17 @@ There are three table properties available for use in table creation.
     - Set partition columns.
   * - ``checkpoint_interval``
     - Set the checkpoint interval in seconds.
+  * - ``change_data_feed_enabled``
+    - Enables storing change data feed entries.
 
-The following example uses all three table properties::
+The following example uses all available table properties::
 
-  CREATE TABLE delta.default.my_partitioned_table
+  CREATE TABLE example.default.example_partitioned_table
   WITH (
     location = 's3://my-bucket/a/path',
     partitioned_by = ARRAY['regionkey'],
-    checkpoint_interval = 5
+    checkpoint_interval = 5,
+    change_data_feed_enabled = true
   )
   AS SELECT name, comment, regionkey FROM tpch.tiny.nation;
 
@@ -581,10 +585,21 @@ The connector can register table into the metastore with existing transaction lo
 The ``system.register_table`` procedure allows the caller to register an existing delta lake
 table in the metastore, using its existing transaction logs and data files::
 
-    CALL delta.system.register_table(schema_name => 'testdb', table_name => 'customer_orders', table_location => 's3://my-bucket/a/path')
+    CALL example.system.register_table(schema_name => 'testdb', table_name => 'customer_orders', table_location => 's3://my-bucket/a/path')
 
 To prevent unauthorized users from accessing data, this procedure is disabled by default.
 The procedure is enabled only when ``delta.register-table-procedure.enabled`` is set to ``true``.
+
+.. _delta-lake-unregister-table:
+
+Unregister table
+^^^^^^^^^^^^^^^^
+The connector can unregister existing Delta Lake tables from the metastore.
+
+The procedure ``system.unregister_table`` allows the caller to unregister an
+existing Delta Lake table from the metastores without deleting the data::
+
+    CALL example.system.unregister_table(schema_name => 'testdb', table_name => 'customer_orders')
 
 .. _delta-lake-write-support:
 
@@ -610,6 +625,117 @@ Write operations are supported for tables stored on the following systems:
   detected when writing concurrently from other Delta Lake engines. You need to
   make sure that no concurrent data modifications are run to avoid data
   corruption.
+
+.. _delta-lake-vacuum:
+
+``VACUUM``
+^^^^^^^^^^
+
+The ``VACUUM`` procedure removes all old files that are not in the transaction
+log, as well as files that are not needed to read table snapshots newer than the
+current time minus the retention period defined by the ``retention period``
+parameter.
+
+Users with ``INSERT`` and ``DELETE`` permissions on a table can run ``VACUUM``
+as follows:
+
+.. code-block:: shell
+
+  CALL example.system.vacuum('exampleschemaname', 'exampletablename', '7d');
+
+All parameters are required, and must be presented in the following order:
+
+* Schema name
+* Table name
+* Retention period
+
+The ``delta.vacuum.min-retention`` config property provides a safety
+measure to ensure that files are retained as expected.  The minimum value for
+this property is ``0s``. There is a minimum retention session property as well,
+``vacuum_min_retention``.
+
+Metadata tables
+---------------
+
+The connector exposes several metadata tables for each Delta Lake table.
+These metadata tables contain information about the internal structure
+of the Delta Lake table. You can query each metadata table by appending the
+metadata table name to the table name::
+
+   SELECT * FROM "test_table$data"
+
+``$data`` table
+^^^^^^^^^^^^^^^
+
+The ``$data`` table is an alias for the Delta Lake table itself.
+
+The statement::
+
+    SELECT * FROM "test_table$data"
+
+is equivalent to::
+
+    SELECT * FROM test_table
+
+``$history`` table
+^^^^^^^^^^^^^^^^^^
+
+The ``$history`` table provides a log of the metadata changes performed on
+the Delta Lake table.
+
+You can retrieve the changelog of the Delta Lake table ``test_table``
+by using the following query::
+
+    SELECT * FROM "test_table$history"
+
+.. code-block:: text
+
+     version |               timestamp               | user_id | user_name |  operation   |         operation_parameters          |                 cluster_id      | read_version |  isolation_level  | is_blind_append
+    ---------+---------------------------------------+---------+-----------+--------------+---------------------------------------+---------------------------------+--------------+-------------------+----------------
+           2 | 2023-01-19 07:40:54.684 Europe/Vienna | trino   | trino     | WRITE        | {queryId=20230119_064054_00008_4vq5t} | trino-406-trino-coordinator     |            2 | WriteSerializable | true
+           1 | 2023-01-19 07:40:41.373 Europe/Vienna | trino   | trino     | ADD COLUMNS  | {queryId=20230119_064041_00007_4vq5t} | trino-406-trino-coordinator     |            0 | WriteSerializable | true
+           0 | 2023-01-19 07:40:10.497 Europe/Vienna | trino   | trino     | CREATE TABLE | {queryId=20230119_064010_00005_4vq5t} | trino-406-trino-coordinator     |            0 | WriteSerializable | true
+
+The output of the query has the following columns:
+
+.. list-table:: History columns
+  :widths: 30, 30, 40
+  :header-rows: 1
+
+  * - Name
+    - Type
+    - Description
+  * - ``version``
+    - ``bigint``
+    - The version of the table corresponding to the operation
+  * - ``timestamp``
+    - ``timestamp(3) with time zone``
+    - The time when the table version became active
+  * - ``user_id``
+    - ``varchar``
+    - The identifier for the user which performed the operation
+  * - ``user_name``
+    - ``varchar``
+    - The username for the user which performed the operation
+  * - ``operation``
+    - ``varchar``
+    - The name of the operation performed on the table
+  * - ``operation_parameters``
+    - ``map(varchar, varchar)``
+    - Parameters of the operation
+  * - ``cluster_id``
+    - ``varchar``
+    - The ID of the cluster which ran the operation
+  * - ``read_version``
+    - ``bigint``
+    - The version of the table which was read in order to perform the operation
+  * - ``isolation_level``
+    - ``varchar``
+    - The level of isolation used to perform the operation
+  * - ``is_blind_append``
+    - ``boolean``
+    - Whether or not the operation appended data
+
 
 Performance
 -----------
@@ -658,7 +784,7 @@ limit the amount of data used to generate the table statistics:
 
 .. code-block:: SQL
 
-  ANALYZE my_table WITH(files_modified_after = TIMESTAMP '2021-08-23
+  ANALYZE example_table WITH(files_modified_after = TIMESTAMP '2021-08-23
   16:43:01.321 Z')
 
 As a result, only files newer than the specified time stamp are used in the
@@ -669,7 +795,7 @@ property:
 
 .. code-block:: SQL
 
-  ANALYZE my_table WITH(columns = ARRAY['nationkey', 'regionkey'])
+  ANALYZE example_table WITH(columns = ARRAY['nationkey', 'regionkey'])
 
 To run ``ANALYZE`` with ``columns`` more than once, the next ``ANALYZE`` must
 run on the same set or a subset of the original columns used.
@@ -693,7 +819,7 @@ extended statistics for a specified table in a specified schema:
 
 .. code-block::
 
-  CALL delta_catalog.system.drop_extended_stats('my_schema', 'my_table')
+  CALL example.system.drop_extended_stats('example_schema', 'example_table')
 
 
 Memory usage
@@ -705,34 +831,6 @@ important to take that into account when provisioning the coordinator.
 
 You need to decrease memory usage by keeping the number of active data files in
 table low by running ``OPTIMIZE`` and ``VACUUM`` in Delta Lake regularly.
-
-.. _delta-lake-vacuum:
-
-``VACUUM``
-""""""""""
-
-The ``VACUUM`` procedure removes all old files that are not in the transaction
-log, as well as files that are not needed to read table snapshots newer than the
-current time minus the retention period defined by the ``retention period``
-parameter.
-
-Users with ``INSERT`` and ``DELETE`` permissions on a table can run ``VACUUM``
-as follows:
-
-.. code-block:: shell
-
-  CALL mydeltacatalog.system.vacuum('myschemaname', 'mytablename', '7d');
-
-All parameters are required, and must be presented in the following order:
-
-* Schema name
-* Table name
-* Retention period
-
-The ``delta.vacuum.min-retention`` config property provides a safety
-measure to ensure that files are retained as expected.  The minimum value for
-this property is ``0s``. There is a minimum retention session property as well,
-``vacuum_min_retention``.
 
 Memory monitoring
 """""""""""""""""

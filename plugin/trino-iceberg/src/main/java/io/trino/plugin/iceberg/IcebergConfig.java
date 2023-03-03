@@ -45,7 +45,7 @@ public class IcebergConfig
     public static final int FORMAT_VERSION_SUPPORT_MIN = 1;
     public static final int FORMAT_VERSION_SUPPORT_MAX = 2;
     public static final String EXTENDED_STATISTICS_CONFIG = "iceberg.extended-statistics.enabled";
-    public static final String EXTENDED_STATISTICS_DESCRIPTION = "Allow ANALYZE and use of extended statistics collected by it";
+    public static final String EXTENDED_STATISTICS_DESCRIPTION = "Enable collection (ANALYZE) and use of extended statistics.";
     public static final String EXPIRE_SNAPSHOTS_MIN_RETENTION = "iceberg.expire_snapshots.min-retention";
     public static final String REMOVE_ORPHAN_FILES_MIN_RETENTION = "iceberg.remove_orphan_files.min-retention";
 
@@ -71,6 +71,7 @@ public class IcebergConfig
     private boolean deleteSchemaLocationsFallback;
     private double minimumAssignedSplitWeight = 0.05;
     private Optional<String> materializedViewsStorageSchema = Optional.empty();
+    private boolean sortedWritingEnabled = true;
 
     public CatalogType getCatalogType()
     {
@@ -337,6 +338,19 @@ public class IcebergConfig
     public IcebergConfig setMaterializedViewsStorageSchema(String materializedViewsStorageSchema)
     {
         this.materializedViewsStorageSchema = Optional.ofNullable(materializedViewsStorageSchema);
+        return this;
+    }
+
+    public boolean isSortedWritingEnabled()
+    {
+        return sortedWritingEnabled;
+    }
+
+    @Config("iceberg.sorted-writing-enabled")
+    @ConfigDescription("Enable sorted writing to tables with a specified sort order")
+    public IcebergConfig setSortedWritingEnabled(boolean sortedWritingEnabled)
+    {
+        this.sortedWritingEnabled = sortedWritingEnabled;
         return this;
     }
 }

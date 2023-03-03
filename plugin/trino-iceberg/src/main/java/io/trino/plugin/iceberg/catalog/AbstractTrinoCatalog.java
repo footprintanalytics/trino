@@ -14,6 +14,8 @@
 package io.trino.plugin.iceberg.catalog;
 
 import com.google.common.collect.ImmutableMap;
+import dev.failsafe.Failsafe;
+import dev.failsafe.RetryPolicy;
 import io.trino.filesystem.TrinoFileSystem;
 import io.trino.plugin.base.CatalogName;
 import io.trino.plugin.hive.HiveMetadata;
@@ -29,10 +31,10 @@ import io.trino.spi.connector.ConnectorTableMetadata;
 import io.trino.spi.connector.ConnectorViewDefinition;
 import io.trino.spi.connector.SchemaTableName;
 import io.trino.spi.type.TypeManager;
-import net.jodah.failsafe.Failsafe;
-import net.jodah.failsafe.RetryPolicy;
+import org.apache.iceberg.AppendFiles;
 import org.apache.iceberg.PartitionSpec;
 import org.apache.iceberg.Schema;
+import org.apache.iceberg.SortOrder;
 import org.apache.iceberg.Table;
 import org.apache.iceberg.TableMetadata;
 import org.apache.iceberg.TableOperations;
@@ -57,6 +59,7 @@ import static io.trino.plugin.iceberg.IcebergMaterializedViewAdditionalPropertie
 import static io.trino.plugin.iceberg.IcebergMaterializedViewAdditionalProperties.getStorageSchema;
 import static io.trino.plugin.iceberg.IcebergMaterializedViewDefinition.decodeMaterializedViewData;
 import static io.trino.plugin.iceberg.IcebergTableProperties.FILE_FORMAT_PROPERTY;
+import static io.trino.plugin.iceberg.IcebergUtil.commit;
 import static io.trino.plugin.iceberg.IcebergUtil.getIcebergTableProperties;
 import static io.trino.spi.StandardErrorCode.TABLE_NOT_FOUND;
 import static java.lang.String.format;
@@ -133,11 +136,12 @@ public abstract class AbstractTrinoCatalog
     public Optional<ConnectorMaterializedViewDefinition> getMaterializedView(ConnectorSession session, SchemaTableName schemaViewName)
     {
         try {
-            return Failsafe.with(new RetryPolicy<>()
+            return Failsafe.with(RetryPolicy.builder()
                             .withMaxAttempts(10)
                             .withBackoff(1, 5_000, ChronoUnit.MILLIS, 4)
                             .withMaxDuration(Duration.ofSeconds(30))
-                            .abortOn(failure -> !(failure instanceof MaterializedViewMayBeBeingRemovedException)))
+                            .abortOn(failure -> !(failure instanceof MaterializedViewMayBeBeingRemovedException))
+                            .build())
                     .get(() -> doGetMaterializedView(session, schemaViewName));
         }
         catch (MaterializedViewMayBeBeingRemovedException e) {
@@ -153,11 +157,12 @@ public abstract class AbstractTrinoCatalog
             SchemaTableName schemaTableName,
             Schema schema,
             PartitionSpec partitionSpec,
+            SortOrder sortOrder,
             String location,
             Map<String, String> properties,
             Optional<String> owner)
     {
-        TableMetadata metadata = newTableMetadata(schema, partitionSpec, location, properties);
+        TableMetadata metadata = newTableMetadata(schema, partitionSpec, sortOrder, location, properties);
         TableOperations ops = tableOperationsProvider.createTableOperations(
                 this,
                 session,
@@ -203,7 +208,8 @@ public abstract class AbstractTrinoCatalog
 
         ConnectorTableMetadata tableMetadata = new ConnectorTableMetadata(storageTable, columns, storageTableProperties, Optional.empty());
         Transaction transaction = IcebergUtil.newCreateTableTransaction(this, tableMetadata, session);
-        transaction.newAppend().commit();
+        AppendFiles appendFiles = transaction.newAppend();
+        commit(appendFiles, session);
         transaction.commitTransaction();
         return storageTable;
     }

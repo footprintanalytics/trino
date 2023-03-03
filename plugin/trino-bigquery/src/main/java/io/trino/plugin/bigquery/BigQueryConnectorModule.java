@@ -59,7 +59,8 @@ public class BigQueryConnectorModule
 
             // Connector implementation
             binder.bind(BigQueryConnector.class).in(Scopes.SINGLETON);
-            binder.bind(BigQueryMetadata.class).in(Scopes.SINGLETON);
+            binder.bind(BigQueryMetadataFactory.class).to(DefaultBigQueryMetadataFactory.class).in(Scopes.SINGLETON);
+            binder.bind(BigQueryTransactionManager.class).in(Scopes.SINGLETON);
             binder.bind(BigQuerySplitManager.class).in(Scopes.SINGLETON);
             binder.bind(BigQueryPageSourceProvider.class).in(Scopes.SINGLETON);
             binder.bind(BigQueryPageSinkProvider.class).in(Scopes.SINGLETON);
@@ -81,16 +82,11 @@ public class BigQueryConnectorModule
         }
 
         /**
-         * Apache Arrow requires reflective access to certain Java internals prohibited in Java 17.
+         * Apache Arrow requires reflective access to certain Java internals prohibited since Java 17.
          * Adds an error to the {@code binder} if required --add-opens is not passed to the JVM.
          */
         private static void verifyPackageAccessAllowed(Binder binder)
         {
-            if (Runtime.version().compareToIgnoreOptional(Runtime.Version.parse("17")) < 0) {
-                // No need to modify access before Java 17
-                return;
-            }
-
             // Match an --add-opens argument that opens a package to unnamed modules.
             // The first group is the opened package.
             Pattern argPattern = Pattern.compile(
@@ -108,7 +104,7 @@ public class BigQueryConnectorModule
 
             if (!openedModules.contains("java.base/java.nio")) {
                 binder.addError(
-                        "BigQuery connector requires additional JVM arguments to run on Java 17 when '" + EXPERIMENTAL_ARROW_SERIALIZATION_ENABLED + "' is enabled. " +
+                        "BigQuery connector requires additional JVM arguments to run when '" + EXPERIMENTAL_ARROW_SERIALIZATION_ENABLED + "' is enabled. " +
                                 "Please add '--add-opens=java.base/java.nio=ALL-UNNAMED' to the JVM configuration.");
             }
         }

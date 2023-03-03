@@ -26,10 +26,10 @@ metastore configuration properties as the :doc:`Hive connector
 The connector recognizes Hudi tables synced to the metastore by the
 `Hudi sync tool <https://hudi.apache.org/docs/syncing_metastore>`_.
 
-To create a catalog that uses the Hudi connector, create a catalog properties file,
-for example ``etc/catalog/example.properties``, that references the ``hudi``
-connector. Update the ``hive.metastore.uri`` with the URI of your Hive metastore
-Thrift service:
+To create a catalog that uses the Hudi connector, create a catalog properties
+file ``etc/catalog/example.properties`` that references the ``hudi`` connector.
+Update the ``hive.metastore.uri`` with the URI of your Hive metastore Thrift
+service:
 
 .. code-block:: properties
 
@@ -55,6 +55,19 @@ Additionally, following configuration properties can be set depending on the use
     * - ``hudi.parquet.use-column-names``
       - Access Parquet columns using names from the file. If disabled, then columns
         are accessed using the index. Only applicable to Parquet file format.
+      - ``true``
+    * - ``parquet.optimized-reader.enabled``
+      - Whether batched column readers should be used when reading Parquet files
+        for improved performance. Set this property to ``false`` to disable the
+        optimized parquet reader by default. The equivalent catalog session
+        property is ``parquet_optimized_reader_enabled``.
+      - ``true``
+    * - ``parquet.optimized-nested-reader.enabled``
+      - Whether batched column readers should be used when reading ARRAY, MAP
+        and ROW types from Parquet files for improved performance. Set this
+        property to ``false`` to disable the optimized parquet reader by default
+        for structural data types. The equivalent catalog session property is
+        ``parquet_optimized_nested_reader_enabled``.
       - ``true``
     * - ``hudi.min-partition-batch-size``
       - Minimum number of partitions returned in a single batch.
@@ -119,7 +132,7 @@ Here are some sample queries:
 
 .. code-block:: sql
 
-    USE a-catalog.myschema;
+    USE example.example_schema;
 
     SELECT symbol, max(ts)
     FROM stock_ticks_cow

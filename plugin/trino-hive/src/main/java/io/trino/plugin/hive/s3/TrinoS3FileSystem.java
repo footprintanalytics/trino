@@ -83,9 +83,9 @@ import com.google.common.net.MediaType;
 import io.airlift.log.Logger;
 import io.airlift.units.DataSize;
 import io.airlift.units.Duration;
-import io.trino.filesystem.MemoryAwareFileSystem;
 import io.trino.hdfs.FSDataInputStreamTail;
 import io.trino.hdfs.FileSystemWithBatchDelete;
+import io.trino.hdfs.MemoryAwareFileSystem;
 import io.trino.memory.context.AggregatedMemoryContext;
 import io.trino.memory.context.LocalMemoryContext;
 import org.apache.hadoop.conf.Configurable;
@@ -197,6 +197,7 @@ public class TrinoS3FileSystem
     public static final String S3_MAX_CONNECTIONS = "trino.s3.max-connections";
     public static final String S3_SOCKET_TIMEOUT = "trino.s3.socket-timeout";
     public static final String S3_CONNECT_TIMEOUT = "trino.s3.connect-timeout";
+    public static final String S3_CONNECT_TTL = "trino.s3.connect-ttl";
     public static final String S3_MAX_RETRY_TIME = "trino.s3.max-retry-time";
     public static final String S3_MAX_BACKOFF_TIME = "trino.s3.max-backoff-time";
     public static final String S3_MAX_CLIENT_RETRIES = "trino.s3.max-client-retries";
@@ -328,6 +329,11 @@ public class TrinoS3FileSystem
                 .withUserAgentPrefix(userAgentPrefix)
                 .withUserAgentSuffix("Trino");
 
+        String connectTtlValue = conf.get(S3_CONNECT_TTL);
+        if (!isNullOrEmpty(connectTtlValue)) {
+            configuration.setConnectionTTL(Duration.valueOf(connectTtlValue).toMillis());
+        }
+
         String proxyHost = conf.get(S3_PROXY_HOST);
         if (nonNull(proxyHost)) {
             configuration.setProxyHost(proxyHost);
@@ -362,8 +368,8 @@ public class TrinoS3FileSystem
     {
         try (Closer closer = Closer.create()) {
             closer.register(this::closeSuper);
-            if (credentialsProvider instanceof Closeable) {
-                closer.register((Closeable) credentialsProvider);
+            if (credentialsProvider instanceof Closeable closeable) {
+                closer.register(closeable);
             }
             closer.register(uploadExecutor::shutdown);
             closer.register(s3::shutdown);
@@ -918,7 +924,7 @@ public class TrinoS3FileSystem
             return retry()
                     .maxAttempts(maxAttempts)
                     .exponentialBackoff(BACKOFF_MIN_SLEEP, maxBackoffTime, maxRetryTime, 2.0)
-                    .stopOn(InterruptedException.class, UnrecoverableS3OperationException.class)
+                    .stopOn(InterruptedException.class, UnrecoverableS3OperationException.class, AbortedException.class)
                     .onRetry(STATS::newGetMetadataRetry)
                     .run("getS3ObjectMetadata", () -> {
                         try {
@@ -928,22 +934,22 @@ public class TrinoS3FileSystem
                         }
                         catch (RuntimeException e) {
                             STATS.newGetMetadataError();
-                            if (e instanceof AmazonServiceException) {
-                                switch (((AmazonServiceException) e).getStatusCode()) {
+                            if (e instanceof AmazonServiceException awsException) {
+                                switch (awsException.getStatusCode()) {
                                     case HTTP_FORBIDDEN:
                                     case HTTP_BAD_REQUEST:
                                         throw new UnrecoverableS3OperationException(path, e);
                                 }
                             }
-                            if (e instanceof AmazonS3Exception &&
-                                    ((AmazonS3Exception) e).getStatusCode() == HTTP_NOT_FOUND) {
+                            if (e instanceof AmazonS3Exception s3Exception &&
+                                    s3Exception.getStatusCode() == HTTP_NOT_FOUND) {
                                 return null;
                             }
                             throw e;
                         }
                     });
         }
-        catch (InterruptedException e) {
+        catch (InterruptedException | AbortedException e) {
             Thread.currentThread().interrupt();
             throw new RuntimeException(e);
         }
@@ -1085,12 +1091,11 @@ public class TrinoS3FileSystem
 
         try {
             Object instance = Class.forName(empClassName).getConstructor().newInstance();
-            if (!(instance instanceof EncryptionMaterialsProvider)) {
+            if (!(instance instanceof EncryptionMaterialsProvider emp)) {
                 throw new RuntimeException("Invalid encryption materials provider class: " + instance.getClass().getName());
             }
-            EncryptionMaterialsProvider emp = (EncryptionMaterialsProvider) instance;
-            if (emp instanceof Configurable) {
-                ((Configurable) emp).setConf(hadoopConfig);
+            if (emp instanceof Configurable configurable) {
+                configurable.setConf(hadoopConfig);
             }
             return Optional.of(emp);
         }
@@ -1135,7 +1140,7 @@ public class TrinoS3FileSystem
                     region = regionProviderChain.getRegion();
                 }
                 catch (SdkClientException ex) {
-                    log.warn("Falling back to default AWS region " + US_EAST_1);
+                    log.warn("Falling back to default AWS region %s", US_EAST_1);
                     region = US_EAST_1.getName();
                 }
             }
@@ -1227,7 +1232,7 @@ public class TrinoS3FileSystem
             return retry()
                     .maxAttempts(maxAttempts)
                     .exponentialBackoff(BACKOFF_MIN_SLEEP, maxBackoffTime, maxRetryTime, 2.0)
-                    .stopOn(InterruptedException.class, UnrecoverableS3OperationException.class)
+                    .stopOn(InterruptedException.class, UnrecoverableS3OperationException.class, AbortedException.class)
                     .onRetry(STATS::newInitiateMultipartUploadRetry)
                     .run("initiateMultipartUpload", () -> {
                         try {
@@ -1252,8 +1257,8 @@ public class TrinoS3FileSystem
                         }
                         catch (RuntimeException e) {
                             STATS.newInitiateMultipartUploadError();
-                            if (e instanceof AmazonS3Exception) {
-                                switch (((AmazonS3Exception) e).getStatusCode()) {
+                            if (e instanceof AmazonS3Exception s3Exception) {
+                                switch (s3Exception.getStatusCode()) {
                                     case HTTP_FORBIDDEN, HTTP_NOT_FOUND, HTTP_BAD_REQUEST -> throw new UnrecoverableS3OperationException(bucket, key, e);
                                 }
                             }
@@ -1261,10 +1266,11 @@ public class TrinoS3FileSystem
                         }
                     });
         }
+        catch (InterruptedException | AbortedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException(e);
+        }
         catch (Exception e) {
-            if (e instanceof InterruptedException) {
-                Thread.currentThread().interrupt();
-            }
             throwIfUnchecked(e);
             throw new RuntimeException(e);
         }
@@ -1329,7 +1335,7 @@ public class TrinoS3FileSystem
                 return retry()
                         .maxAttempts(maxAttempts)
                         .exponentialBackoff(BACKOFF_MIN_SLEEP, maxBackoffTime, maxRetryTime, 2.0)
-                        .stopOn(InterruptedException.class, UnrecoverableS3OperationException.class, EOFException.class)
+                        .stopOn(InterruptedException.class, UnrecoverableS3OperationException.class, EOFException.class, AbortedException.class)
                         .onRetry(STATS::newGetObjectRetry)
                         .run("getS3Object", () -> {
                             InputStream stream;
@@ -1341,15 +1347,15 @@ public class TrinoS3FileSystem
                             }
                             catch (RuntimeException e) {
                                 STATS.newGetObjectError();
-                                if (e instanceof AmazonServiceException) {
-                                    switch (((AmazonServiceException) e).getStatusCode()) {
+                                if (e instanceof AmazonServiceException s3Exception) {
+                                    switch (s3Exception.getStatusCode()) {
                                         case HTTP_FORBIDDEN:
                                         case HTTP_BAD_REQUEST:
                                             throw new UnrecoverableS3OperationException(path, e);
                                     }
                                 }
-                                if (e instanceof AmazonS3Exception) {
-                                    switch (((AmazonS3Exception) e).getStatusCode()) {
+                                if (e instanceof AmazonS3Exception s3Exception) {
+                                    switch (s3Exception.getStatusCode()) {
                                         case HTTP_RANGE_NOT_SATISFIABLE:
                                             throw new EOFException(CANNOT_SEEK_PAST_EOF);
                                         case HTTP_NOT_FOUND:
@@ -1504,7 +1510,7 @@ public class TrinoS3FileSystem
                 return retry()
                         .maxAttempts(maxAttempts)
                         .exponentialBackoff(BACKOFF_MIN_SLEEP, maxBackoffTime, maxRetryTime, 2.0)
-                        .stopOn(InterruptedException.class, UnrecoverableS3OperationException.class)
+                        .stopOn(InterruptedException.class, UnrecoverableS3OperationException.class, AbortedException.class)
                         .onRetry(STATS::newGetObjectRetry)
                         .run("getS3Object", () -> {
                             try {
@@ -1515,15 +1521,15 @@ public class TrinoS3FileSystem
                             }
                             catch (RuntimeException e) {
                                 STATS.newGetObjectError();
-                                if (e instanceof AmazonServiceException) {
-                                    switch (((AmazonServiceException) e).getStatusCode()) {
+                                if (e instanceof AmazonServiceException awsException) {
+                                    switch (awsException.getStatusCode()) {
                                         case HTTP_FORBIDDEN:
                                         case HTTP_BAD_REQUEST:
                                             throw new UnrecoverableS3OperationException(path, e);
                                     }
                                 }
-                                if (e instanceof AmazonS3Exception) {
-                                    switch (((AmazonS3Exception) e).getStatusCode()) {
+                                if (e instanceof AmazonS3Exception s3Exception) {
+                                    switch (s3Exception.getStatusCode()) {
                                         case HTTP_RANGE_NOT_SATISFIABLE:
                                             // ignore request for start past end of object
                                             return new ByteArrayInputStream(new byte[0]);
@@ -1560,8 +1566,8 @@ public class TrinoS3FileSystem
         private static void abortStream(InputStream in)
         {
             try {
-                if (in instanceof S3ObjectInputStream) {
-                    ((S3ObjectInputStream) in).abort();
+                if (in instanceof S3ObjectInputStream s3ObjectInputStream) {
+                    s3ObjectInputStream.abort();
                 }
                 else {
                     in.close();
@@ -1575,7 +1581,7 @@ public class TrinoS3FileSystem
         private static RuntimeException propagate(Exception e)
                 throws IOException
         {
-            if (e instanceof InterruptedException) {
+            if (e instanceof InterruptedException | e instanceof AbortedException) {
                 Thread.currentThread().interrupt();
                 throw new InterruptedIOException();
             }

@@ -21,6 +21,8 @@ import com.google.inject.Provides;
 import com.google.inject.Scopes;
 import io.airlift.configuration.AbstractConfigurationAwareModule;
 import io.trino.Session;
+import io.trino.plugin.base.security.UserNameProvider;
+import io.trino.plugin.hive.ForHiveMetastore;
 import io.trino.plugin.hive.containers.HiveMinioDataLake;
 import io.trino.plugin.hive.metastore.HiveMetastore;
 import io.trino.plugin.hive.metastore.HiveMetastoreFactory;
@@ -55,10 +57,11 @@ import java.util.concurrent.ExecutorService;
 import static com.google.inject.multibindings.OptionalBinder.newOptionalBinder;
 import static io.airlift.concurrent.Threads.threadsNamed;
 import static io.airlift.configuration.ConfigBinder.configBinder;
+import static io.trino.plugin.base.security.UserNameProvider.SIMPLE_USER_NAME_PROVIDER;
 import static io.trino.plugin.deltalake.DeltaLakeQueryRunner.DELTA_CATALOG;
-import static io.trino.plugin.hive.containers.HiveMinioDataLake.MINIO_ACCESS_KEY;
-import static io.trino.plugin.hive.containers.HiveMinioDataLake.MINIO_SECRET_KEY;
 import static io.trino.testing.TestingSession.testSessionBuilder;
+import static io.trino.testing.containers.Minio.MINIO_ACCESS_KEY;
+import static io.trino.testing.containers.Minio.MINIO_SECRET_KEY;
 import static java.lang.String.format;
 import static java.util.concurrent.Executors.newCachedThreadPool;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -110,6 +113,9 @@ public class TestDeltaLakePerTransactionMetastoreCache
                         binder.bind(ThriftMetastoreFactory.class).to(ThriftHiveMetastoreFactory.class).in(Scopes.SINGLETON);
                         newExporter(binder).export(ThriftMetastoreFactory.class)
                                 .as(generator -> generator.generatedNameOf(ThriftHiveMetastore.class));
+                        newOptionalBinder(binder, Key.get(UserNameProvider.class, ForHiveMetastore.class))
+                                .setDefault()
+                                .toInstance(SIMPLE_USER_NAME_PROVIDER);
                         install(new ThriftMetastoreAuthenticationModule());
                         binder.bind(BridgingHiveMetastoreFactory.class).in(Scopes.SINGLETON);
                         binder.bind(Key.get(boolean.class, AllowDeltaLakeManagedTableRename.class)).toInstance(false);
@@ -146,7 +152,7 @@ public class TestDeltaLakePerTransactionMetastoreCache
                     @Provides
                     @Singleton
                     @ThriftHiveWriteStatisticsExecutor
-                    public ExecutorService createWriteStatisticsExecutor(ThriftMetastoreConfig hiveConfig)
+                    public ExecutorService createWriteStatisticsExecutor()
                     {
                         return executorService;
                     }
@@ -156,7 +162,7 @@ public class TestDeltaLakePerTransactionMetastoreCache
         deltaLakeProperties.put("hive.metastore.uri", "thrift://" + hiveMinioDataLake.getHiveHadoop().getHiveMetastoreEndpoint());
         deltaLakeProperties.put("hive.s3.aws-access-key", MINIO_ACCESS_KEY);
         deltaLakeProperties.put("hive.s3.aws-secret-key", MINIO_SECRET_KEY);
-        deltaLakeProperties.put("hive.s3.endpoint", hiveMinioDataLake.getMinioAddress());
+        deltaLakeProperties.put("hive.s3.endpoint", hiveMinioDataLake.getMinio().getMinioAddress());
         deltaLakeProperties.put("hive.s3.path-style-access", "true");
         deltaLakeProperties.put("hive.metastore", "test"); // use test value so we do not get clash with default bindings)
         deltaLakeProperties.put("hive.metastore-timeout", "1m"); // read timed out sometimes happens with the default timeout
@@ -166,7 +172,7 @@ public class TestDeltaLakePerTransactionMetastoreCache
             deltaLakeProperties.put("delta.per-transaction-metastore-cache-maximum-size", "1");
         }
 
-        queryRunner.createCatalog(DELTA_CATALOG, "delta-lake", deltaLakeProperties.buildOrThrow());
+        queryRunner.createCatalog(DELTA_CATALOG, "delta_lake", deltaLakeProperties.buildOrThrow());
 
         if (createdDeltaLake) {
             List<TpchTable<? extends TpchEntity>> tpchTables = List.of(TpchTable.NATION, TpchTable.REGION);

@@ -17,8 +17,8 @@ Configuration
 -------------
 
 To configure the Elasticsearch connector, create a catalog properties file
-``etc/catalog/elasticsearch.properties`` with the following contents,
-replacing the properties as appropriate:
+``etc/catalog/example.properties`` with the following contents, replacing the
+properties as appropriate for your setup:
 
 .. code-block:: text
 
@@ -38,8 +38,8 @@ Configuration properties
       - Description
       - Default
     * - ``elasticsearch.host``
-      - Hostname of the Elasticsearch node to connect to. This property is
-        required.
+      - The comma-separated list of host names for the Elasticsearch node to
+        connect to. This property is required.
       -
     * - ``elasticsearch.port``
       - Port of the Elasticsearch node to connect to.
@@ -455,14 +455,15 @@ The ``raw_query`` function requires three parameters:
 Once executed, the query returns a single row containing the resulting JSON
 payload returned by Elasticsearch.
 
-For example, the following use of the ``raw_query`` table function searches for
-documents in the ``orders`` index where the country name is ``ALGERIA``::
+For example, query the ``example`` catalog and use the ``raw_query`` table
+function to search for documents in the ``orders`` index where the country name
+is ``ALGERIA``::
 
     SELECT
       *
     FROM
       TABLE(
-        elasticsearch.system.raw_query(
+        example.system.raw_query(
           schema => 'sales',
           index => 'orders',
           query => '{

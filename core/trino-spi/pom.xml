@@ -5,7 +5,7 @@
     <parent>
         <groupId>io.trino</groupId>
         <artifactId>trino-root</artifactId>
-        <version>405</version>
+        <version>409-SNAPSHOT</version>
         <relativePath>../../pom.xml</relativePath>
     </parent>
 
@@ -217,21 +217,56 @@
                                         <match>@java.lang.Deprecated(*) ^*;</match>
                                     </old>
                                 </item>
+                                <!-- Revapi tries to compare any API with its previous version -->
+                                <!-- If it can't download the old version, if falls back to comparing with an empty file -->
+                                <!-- This can lead to errors which are not shown in daily development where local Maven cache has the old version -->
+                                <item>
+                                    <ignore>true</ignore>
+                                    <code>java.class.externalClassExposedInAPI</code>
+                                    <new>class io.airlift.slice.BasicSliceInput</new>
+                                    <justification>Trino SPI depends on Airlift</justification>
+                                </item>
+                                <item>
+                                    <ignore>true</ignore>
+                                    <code>java.class.externalClassExposedInAPI</code>
+                                    <new>class io.airlift.slice.Slice</new>
+                                    <justification>Trino SPI depends on Airlift</justification>
+                                </item>
+                                <item>
+                                    <ignore>true</ignore>
+                                    <code>java.class.externalClassExposedInAPI</code>
+                                    <new>class io.airlift.slice.SliceInput</new>
+                                    <justification>Trino SPI depends on Airlift</justification>
+                                </item>
+                                <item>
+                                    <ignore>true</ignore>
+                                    <code>java.class.externalClassExposedInAPI</code>
+                                    <new>class io.airlift.slice.SliceOutput</new>
+                                    <justification>Trino SPI depends on Airlift</justification>
+                                </item>
                                 <!-- Backwards incompatible changes since the previous release -->
                                 <!-- Any exclusions below can be deleted after each release -->
                                 <item>
                                     <ignore>true</ignore>
-                                    <code>java.method.removed</code>
-                                    <old>method boolean io.trino.spi.connector.MaterializedViewFreshness::isMaterializedViewFresh()</old>
+                                    <code>java.field.visibilityReduced</code>
+                                    <old>field io.trino.spi.connector.InMemoryRecordSet.InMemoryRecordCursor&lt;T extends java.util.Iterator&lt;? extends java.util.List&lt;?&gt;&gt;&gt;.records</old>
+                                    <new>field io.trino.spi.connector.InMemoryRecordSet.InMemoryRecordCursor.records</new>
+                                    <oldVisibility>protected</oldVisibility>
+                                    <newVisibility>private</newVisibility>
                                 </item>
                                 <item>
                                     <ignore>true</ignore>
-                                    <code>java.method.visibilityReduced</code>
-                                    <old>method java.lang.invoke.MethodHandle io.trino.spi.predicate.Range::getComparisonOperator(io.trino.spi.type.Type)</old>
-                                    <new>method java.lang.invoke.MethodHandle io.trino.spi.predicate.Range::getComparisonOperator(io.trino.spi.type.Type)</new>
-                                    <oldVisibility>protected</oldVisibility>
-                                    <newVisibility>package</newVisibility>
-                                    <justification>It was not accessible outside of SPI anyway</justification>
+                                    <code>java.method.parameterTypeParameterChanged</code>
+                                    <old>parameter void io.trino.spi.connector.InMemoryRecordSet.InMemoryRecordCursor&lt;T extends java.util.Iterator&lt;? extends java.util.List&lt;?&gt;&gt;&gt;::&lt;init&gt;(java.util.List&lt;io.trino.spi.type.Type&gt;, ===T===)</old>
+                                    <new>parameter void io.trino.spi.connector.InMemoryRecordSet.InMemoryRecordCursor::&lt;init&gt;(java.util.List&lt;io.trino.spi.type.Type&gt;, ===java.util.Iterator&lt;? extends java.util.List&lt;?&gt;&gt;===)</new>
+                                    <parameterIndex>1</parameterIndex>
+                                </item>
+                                <item>
+                                    <ignore>true</ignore>
+                                    <code>java.generics.formalTypeParameterRemoved</code>
+                                    <old>class io.trino.spi.connector.InMemoryRecordSet.InMemoryRecordCursor&lt;T extends java.util.Iterator&lt;? extends java.util.List&lt;?&gt;&gt;&gt;</old>
+                                    <new>class io.trino.spi.connector.InMemoryRecordSet.InMemoryRecordCursor</new>
+                                    <typeParameter>T extends java.util.Iterator&lt;? extends java.util.List&lt;?&gt;&gt;</typeParameter>
                                 </item>
                             </differences>
                         </revapi.differences>

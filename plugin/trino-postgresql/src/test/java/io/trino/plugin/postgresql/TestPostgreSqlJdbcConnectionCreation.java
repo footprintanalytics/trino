@@ -19,7 +19,6 @@ import com.google.inject.Binder;
 import com.google.inject.Provides;
 import com.google.inject.Singleton;
 import io.airlift.configuration.AbstractConfigurationAwareModule;
-import io.trino.plugin.jdbc.BaseJdbcConfig;
 import io.trino.plugin.jdbc.BaseJdbcConnectionCreationTest;
 import io.trino.plugin.jdbc.ConnectionFactory;
 import io.trino.plugin.jdbc.DriverConnectionFactory;
@@ -87,7 +86,7 @@ public class TestPostgreSqlJdbcConnectionCreation
                 {"SELECT * FROM information_schema.schemata", 1, Optional.empty()},
                 {"SELECT * FROM information_schema.tables", 1, Optional.empty()},
                 {"SELECT * FROM information_schema.columns", 1, Optional.empty()},
-                {"SELECT * FROM nation", 2, Optional.empty()},
+                {"SELECT * FROM nation", 3, Optional.empty()},
                 {"SELECT * FROM TABLE (system.query(query => 'SELECT * FROM tpch.nation'))", 2, Optional.empty()},
                 {"CREATE TABLE copy_of_nation AS SELECT * FROM nation", 6, Optional.empty()},
                 {"INSERT INTO copy_of_nation SELECT * FROM nation", 6, Optional.empty()},
@@ -146,7 +145,7 @@ public class TestPostgreSqlJdbcConnectionCreation
         @Provides
         @Singleton
         @ForBaseJdbc
-        public ConnectionFactory getConnectionFactory(BaseJdbcConfig config, CredentialProvider credentialProvider)
+        public ConnectionFactory getConnectionFactory()
         {
             return connectionCountingConnectionFactory;
         }

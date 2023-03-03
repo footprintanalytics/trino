@@ -15,6 +15,7 @@ package io.trino.sql.query;
 
 import com.google.common.base.Joiner;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Lists;
 import io.trino.Session;
 import io.trino.execution.warnings.WarningCollector;
 import io.trino.metadata.FunctionBundle;
@@ -263,15 +264,12 @@ public class QueryAssertions
             @Override
             public String toStringOf(Object object)
             {
-                if (object instanceof List) {
-                    List<?> list = (List<?>) object;
+                if (object instanceof List<?> list) {
                     return list.stream()
                             .map(this::toStringOf)
                             .collect(Collectors.joining(", "));
                 }
-                if (object instanceof MaterializedRow) {
-                    MaterializedRow row = (MaterializedRow) object;
-
+                if (object instanceof MaterializedRow row) {
                     return row.getFields().stream()
                             .map(this::formatRowElement)
                             .collect(Collectors.joining(", ", "(", ")"));
@@ -373,12 +371,14 @@ public class QueryAssertions
             return this;
         }
 
+        @CanIgnoreReturnValue
         public QueryAssert matches(@Language("SQL") String query)
         {
             MaterializedResult expected = runner.execute(session, query);
             return matches(expected);
         }
 
+        @CanIgnoreReturnValue
         public QueryAssert matches(MaterializedResult expected)
         {
             return satisfies(actual -> {
@@ -399,6 +399,7 @@ public class QueryAssertions
             });
         }
 
+        @CanIgnoreReturnValue
         public QueryAssert matches(PlanMatchPattern expectedPlan)
         {
             transaction(runner.getTransactionManager(), runner.getAccessControl())
@@ -415,12 +416,14 @@ public class QueryAssertions
             return this;
         }
 
+        @CanIgnoreReturnValue
         public QueryAssert containsAll(@Language("SQL") String query)
         {
             MaterializedResult expected = runner.execute(session, query);
             return containsAll(expected);
         }
 
+        @CanIgnoreReturnValue
         public QueryAssert containsAll(MaterializedResult expected)
         {
             return satisfies(actual -> {
@@ -435,6 +438,7 @@ public class QueryAssertions
             });
         }
 
+        @CanIgnoreReturnValue
         public QueryAssert hasOutputTypes(List<Type> expectedTypes)
         {
             return satisfies(actual -> {
@@ -442,6 +446,7 @@ public class QueryAssertions
             });
         }
 
+        @CanIgnoreReturnValue
         public QueryAssert outputHasType(int index, Type expectedType)
         {
             return satisfies(actual -> {
@@ -458,6 +463,7 @@ public class QueryAssertions
                     .isEqualTo(expectedTypes);
         }
 
+        @CanIgnoreReturnValue
         public QueryAssert returnsEmptyResult()
         {
             return satisfies(actual -> {
@@ -468,6 +474,7 @@ public class QueryAssertions
         /**
          * Verifies query is fully pushed down and that results are the same as when pushdown is fully disabled.
          */
+        @CanIgnoreReturnValue
         public QueryAssert isFullyPushedDown()
         {
             checkState(!(runner instanceof LocalQueryRunner), "isFullyPushedDown() currently does not work with LocalQueryRunner");
@@ -498,9 +505,11 @@ public class QueryAssertions
          * when pushdown capabilities are improved.
          */
         @SafeVarargs
-        public final QueryAssert isNotFullyPushedDown(Class<? extends PlanNode>... retainedNodes)
+        @CanIgnoreReturnValue
+        public final QueryAssert isNotFullyPushedDown(Class<? extends PlanNode> firstRetainedNode, Class<? extends PlanNode>... moreRetainedNodes)
         {
             PlanMatchPattern expectedPlan = PlanMatchPattern.node(TableScanNode.class);
+            List<Class<? extends PlanNode>> retainedNodes = Lists.asList(firstRetainedNode, moreRetainedNodes);
             for (Class<? extends PlanNode> retainedNode : ImmutableList.copyOf(retainedNodes).reverse()) {
                 expectedPlan = PlanMatchPattern.node(retainedNode, expectedPlan);
             }
@@ -513,6 +522,7 @@ public class QueryAssertions
          * <b>Note:</b> the primary intent of this assertion is to ensure the test is updated to {@link #isFullyPushedDown()}
          * when pushdown capabilities are improved.
          */
+        @CanIgnoreReturnValue
         public QueryAssert isNotFullyPushedDown(PlanMatchPattern retainedSubplan)
         {
             PlanMatchPattern expectedPlan = PlanMatchPattern.anyTree(retainedSubplan);
@@ -530,6 +540,7 @@ public class QueryAssertions
         /**
          * Verifies join query is not fully pushed down by containing JOIN node.
          */
+        @CanIgnoreReturnValue
         public QueryAssert joinIsNotFullyPushedDown()
         {
             return verifyPlan(plan -> {
@@ -704,8 +715,7 @@ public class QueryAssertions
             @Override
             public String toStringOf(Object object)
             {
-                if (object instanceof SqlTimestamp) {
-                    SqlTimestamp timestamp = (SqlTimestamp) object;
+                if (object instanceof SqlTimestamp timestamp) {
                     return String.format(
                             "%s [p = %s, epochMicros = %s, fraction = %s]",
                             timestamp,
@@ -713,8 +723,7 @@ public class QueryAssertions
                             timestamp.getEpochMicros(),
                             timestamp.getPicosOfMicros());
                 }
-                if (object instanceof SqlTimestampWithTimeZone) {
-                    SqlTimestampWithTimeZone timestamp = (SqlTimestampWithTimeZone) object;
+                if (object instanceof SqlTimestampWithTimeZone timestamp) {
                     return String.format(
                             "%s [p = %s, epochMillis = %s, fraction = %s, tz = %s]",
                             timestamp,
@@ -723,12 +732,10 @@ public class QueryAssertions
                             timestamp.getPicosOfMilli(),
                             timestamp.getTimeZoneKey());
                 }
-                if (object instanceof SqlTime) {
-                    SqlTime time = (SqlTime) object;
+                if (object instanceof SqlTime time) {
                     return String.format("%s [picos = %s]", time, time.getPicos());
                 }
-                if (object instanceof SqlTimeWithTimeZone) {
-                    SqlTimeWithTimeZone time = (SqlTimeWithTimeZone) object;
+                if (object instanceof SqlTimeWithTimeZone time) {
                     return String.format(
                             "%s [picos = %s, offset = %s]",
                             time,

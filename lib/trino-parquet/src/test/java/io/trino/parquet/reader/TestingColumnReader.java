@@ -330,12 +330,29 @@ public class TestingColumnReader
         };
     }
 
+    private static Writer<String> writeFixedWidthBinary(int typeLength)
+    {
+        return (writer, values) -> {
+            String[] result = new String[values.length];
+            for (int i = 0; i < values.length; i++) {
+                if (values[i] != null) {
+                    byte[] bytes = Arrays.copyOf(Integer.toString(values[i]).getBytes(UTF_8), typeLength);
+                    writer.writeBytes(Binary.fromConstantByteArray(bytes));
+                    result[i] = new String(bytes, UTF_8);
+                }
+            }
+            return result;
+        };
+    }
+
     private static final Assertion<Number> ASSERT_BYTE = (values, block, offset, blockOffset) -> assertThat(block.getByte(blockOffset, 0)).isEqualTo(values[offset].byteValue());
     private static final Assertion<Number> ASSERT_SHORT = (values, block, offset, blockOffset) -> assertThat(block.getShort(blockOffset, 0)).isEqualTo(values[offset].shortValue());
     private static final Assertion<Number> ASSERT_INT = (values, block, offset, blockOffset) -> assertThat(block.getInt(blockOffset, 0)).isEqualTo(values[offset].intValue());
     private static final Assertion<Float> ASSERT_FLOAT = (values, block, offset, blockOffset) -> assertThat(intBitsToFloat(block.getInt(blockOffset, 0))).isEqualTo(values[offset].floatValue());
     private static final Assertion<Number> ASSERT_LONG = (values, block, offset, blockOffset) -> assertThat(block.getLong(blockOffset, 0)).isEqualTo(values[offset].longValue());
     private static final Assertion<Double> ASSERT_DOUBLE = (values, block, offset, blockOffset) -> assertThat(Double.longBitsToDouble(block.getLong(blockOffset, 0))).isEqualTo(values[offset].doubleValue());
+    private static final Assertion<Float> ASSERT_DOUBLE_STORED_AS_FLOAT = (values, block, offset, blockOffset) ->
+            assertThat(Double.longBitsToDouble(block.getLong(blockOffset, 0))).isEqualTo(values[offset].floatValue());
     private static final Assertion<Number> ASSERT_INT_128 = new Assertion<>()
     {
         @Override
@@ -630,6 +647,8 @@ public class TestingColumnReader
         return new ColumnReaderFormat[] {
                 new ColumnReaderFormat<>(BOOLEAN, BooleanType.BOOLEAN, BOOLEAN_WRITER, null, WRITE_BOOLEAN, ASSERT_BYTE),
                 new ColumnReaderFormat<>(FLOAT, REAL, PLAIN_WRITER, DICTIONARY_FLOAT_WRITER, WRITE_FLOAT, ASSERT_FLOAT),
+                // FLOAT parquet primitive type can be read as a DOUBLE or REAL type in Trino
+                new ColumnReaderFormat<>(FLOAT, DoubleType.DOUBLE, PLAIN_WRITER, DICTIONARY_FLOAT_WRITER, WRITE_FLOAT, ASSERT_DOUBLE_STORED_AS_FLOAT),
                 new ColumnReaderFormat<>(DOUBLE, DoubleType.DOUBLE, PLAIN_WRITER, DICTIONARY_DOUBLE_WRITER, WRITE_DOUBLE, ASSERT_DOUBLE),
                 new ColumnReaderFormat<>(INT32, decimalType(0, 8), createDecimalType(8), PLAIN_WRITER, DICTIONARY_INT_WRITER, WRITE_INT, ASSERT_INT),
                 new ColumnReaderFormat<>(INT32, BIGINT, PLAIN_WRITER, DICTIONARY_INT_WRITER, WRITE_INT, ASSERT_LONG),
@@ -637,8 +656,12 @@ public class TestingColumnReader
                 new ColumnReaderFormat<>(INT32, SMALLINT, PLAIN_WRITER, DICTIONARY_INT_WRITER, WRITE_SHORT, ASSERT_SHORT),
                 new ColumnReaderFormat<>(INT32, TINYINT, PLAIN_WRITER, DICTIONARY_INT_WRITER, WRITE_BYTE, ASSERT_BYTE),
                 new ColumnReaderFormat<>(BINARY, VARCHAR, PLAIN_WRITER, DICTIONARY_BINARY_WRITER, WRITE_BINARY, ASSERT_BINARY),
+                new ColumnReaderFormat<>(FIXED_LEN_BYTE_ARRAY, 8, null, VARCHAR, FIXED_LENGTH_WRITER, DICTIONARY_FIXED_LENGTH_WRITER, writeFixedWidthBinary(8), ASSERT_BINARY),
                 new ColumnReaderFormat<>(INT64, decimalType(0, 16), createDecimalType(16), PLAIN_WRITER, DICTIONARY_LONG_WRITER, WRITE_LONG, ASSERT_LONG),
                 new ColumnReaderFormat<>(INT64, BIGINT, PLAIN_WRITER, DICTIONARY_LONG_WRITER, WRITE_LONG, ASSERT_LONG),
+                new ColumnReaderFormat<>(INT64, INTEGER, PLAIN_WRITER, DICTIONARY_LONG_WRITER, WRITE_LONG, ASSERT_INT),
+                new ColumnReaderFormat<>(INT64, SMALLINT, PLAIN_WRITER, DICTIONARY_LONG_WRITER, WRITE_LONG, ASSERT_SHORT),
+                new ColumnReaderFormat<>(INT64, TINYINT, PLAIN_WRITER, DICTIONARY_LONG_WRITER, WRITE_LONG, ASSERT_BYTE),
                 new ColumnReaderFormat<>(FIXED_LEN_BYTE_ARRAY, 8, decimalType(0, 2), createDecimalType(2), FIXED_LENGTH_WRITER, DICTIONARY_FIXED_LENGTH_WRITER, WRITE_SHORT_DECIMAL, ASSERT_LONG),
                 new ColumnReaderFormat<>(FIXED_LEN_BYTE_ARRAY, 16, decimalType(2, 38), createDecimalType(38, 2), FIXED_LENGTH_WRITER, DICTIONARY_FIXED_LENGTH_WRITER, writeLongDecimal(16), ASSERT_INT_128),
                 new ColumnReaderFormat<>(FIXED_LEN_BYTE_ARRAY, 16, uuidType(), UUID, FIXED_LENGTH_WRITER, DICTIONARY_FIXED_LENGTH_WRITER, WRITE_UUID, ASSERT_INT_128),
@@ -647,7 +670,8 @@ public class TestingColumnReader
                 new ColumnReaderFormat<>(INT64, timeType(false, MICROS), TimeType.TIME_MICROS, PLAIN_WRITER, DICTIONARY_LONG_WRITER, WRITE_LONG, assertTime(6)),
                 // Short decimals
                 new ColumnReaderFormat<>(INT32, decimalType(0, 8), createDecimalType(8), PLAIN_WRITER, DICTIONARY_INT_WRITER, WRITE_INT, ASSERT_INT),
-                new ColumnReaderFormat<>(INT32, createDecimalType(9), PLAIN_WRITER, DICTIONARY_INT_WRITER, WRITE_INT, ASSERT_INT),
+                // INT32 values can be read as zero scale decimals provided the precision is at least 10 to accommodate the largest possible integer
+                new ColumnReaderFormat<>(INT32, createDecimalType(10), PLAIN_WRITER, DICTIONARY_INT_WRITER, WRITE_INT, ASSERT_INT),
                 new ColumnReaderFormat<>(INT32, decimalType(0, 8), BIGINT, PLAIN_WRITER, DICTIONARY_INT_WRITER, WRITE_INT, ASSERT_LONG),
                 new ColumnReaderFormat<>(INT32, decimalType(0, 8), INTEGER, PLAIN_WRITER, DICTIONARY_INT_WRITER, WRITE_INT, ASSERT_INT),
                 new ColumnReaderFormat<>(INT32, decimalType(0, 8), SMALLINT, PLAIN_WRITER, DICTIONARY_INT_WRITER, WRITE_SHORT, ASSERT_SHORT),

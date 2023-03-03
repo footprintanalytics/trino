@@ -679,6 +679,8 @@ public class RedshiftClient
         }
 
         // Fall back to legacy behavior
+        // TODO we should not fall back to legacy behavior, the mappings should be explicit (the legacyToWriteMapping
+        //  is just a copy of some generic default mappings that used to exist)
         return legacyToWriteMapping(type);
     }
 
@@ -704,6 +706,12 @@ public class RedshiftClient
                 quoted(column.getColumnName()),
                 comment.map(RedshiftClient::redshiftVarcharLiteral).orElse("NULL"));
         execute(session, sql);
+    }
+
+    @Override
+    public void setColumnType(ConnectorSession session, JdbcTableHandle handle, JdbcColumnHandle column, Type type)
+    {
+        throw new TrinoException(NOT_SUPPORTED, "This connector does not support setting column types");
     }
 
     private static String redshiftVarcharLiteral(String value)

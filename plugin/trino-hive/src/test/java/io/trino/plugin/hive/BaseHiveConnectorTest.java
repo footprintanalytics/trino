@@ -120,6 +120,7 @@ import static io.trino.plugin.hive.HiveMetadata.MODIFYING_NON_TRANSACTIONAL_TABL
 import static io.trino.plugin.hive.HiveQueryRunner.HIVE_CATALOG;
 import static io.trino.plugin.hive.HiveQueryRunner.TPCH_SCHEMA;
 import static io.trino.plugin.hive.HiveQueryRunner.createBucketedSession;
+import static io.trino.plugin.hive.HiveStorageFormat.REGEX;
 import static io.trino.plugin.hive.HiveTableProperties.AUTO_PURGE;
 import static io.trino.plugin.hive.HiveTableProperties.BUCKETED_BY_PROPERTY;
 import static io.trino.plugin.hive.HiveTableProperties.BUCKET_COUNT_PROPERTY;
@@ -155,7 +156,6 @@ import static io.trino.testing.TestingAccessControlManager.TestingPrivilegeType.
 import static io.trino.testing.TestingAccessControlManager.privilege;
 import static io.trino.testing.TestingNames.randomNameSuffix;
 import static io.trino.testing.TestingSession.testSessionBuilder;
-import static io.trino.testing.assertions.Assert.assertEquals;
 import static io.trino.transaction.TransactionBuilder.transaction;
 import static io.trino.type.InternalTypeManager.TESTING_TYPE_MANAGER;
 import static java.lang.String.format;
@@ -172,6 +172,7 @@ import static java.util.stream.Collectors.toSet;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.data.Offset.offset;
+import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertFalse;
 import static org.testng.Assert.assertNotEquals;
 import static org.testng.Assert.assertNotNull;
@@ -233,6 +234,10 @@ public abstract class BaseHiveConnectorTest
             case SUPPORTS_COMMENT_ON_VIEW:
             case SUPPORTS_COMMENT_ON_VIEW_COLUMN:
                 return true;
+
+            case SUPPORTS_DROP_FIELD:
+            case SUPPORTS_SET_COLUMN_TYPE:
+                return false;
 
             case SUPPORTS_CREATE_VIEW:
                 return true;
@@ -1155,15 +1160,6 @@ public abstract class BaseHiveConnectorTest
                                                                         ImmutableSet.of(
                                                                                 new FormattedRange(
                                                                                         new FormattedMarker(Optional.of("100"), EXACTLY),
-                                                                                        new FormattedMarker(Optional.of("100"), EXACTLY))))),
-                                                        new ColumnConstraint(
-                                                                "orderkey",
-                                                                BIGINT,
-                                                                new FormattedDomain(
-                                                                        false,
-                                                                        ImmutableSet.of(
-                                                                                new FormattedRange(
-                                                                                        new FormattedMarker(Optional.of("100"), EXACTLY),
                                                                                         new FormattedMarker(Optional.of("100"), EXACTLY))))))),
                                         estimate)),
                         Optional.of(new CatalogSchemaTableName(catalog, "tpch", "test_io_explain")),
@@ -2061,6 +2057,10 @@ public abstract class BaseHiveConnectorTest
     {
         // create empty bucket files for all storage formats and compression codecs
         for (HiveStorageFormat storageFormat : HiveStorageFormat.values()) {
+            if (storageFormat == REGEX) {
+                // REGEX format is readonly
+                continue;
+            }
             for (HiveCompressionCodec compressionCodec : HiveCompressionCodec.values()) {
                 if ((storageFormat == HiveStorageFormat.AVRO) && (compressionCodec == HiveCompressionCodec.LZ4)) {
                     continue;
@@ -3491,8 +3491,12 @@ public abstract class BaseHiveConnectorTest
                 .hasMessage("Query over table 'tpch.%s' can potentially read more than 1000 partitions", tableName);
         assertThatThrownBy(() -> query("SELECT count(*) FROM " + tableName))
                 .hasMessage("Query over table 'tpch.%s' can potentially read more than 1000 partitions", tableName);
-        assertThatThrownBy(() -> query("SELECT * FROM " + tableName + " WHERE part1 % 400 = 3")) // translated to Domain.all, all partitions must be scanned
-                .hasMessage("Query over table 'tpch.%s' can potentially read more than 1000 partitions", tableName);
+
+        // verify we can query with a predicate that is not representable as a TupleDomain
+        assertThat(query("SELECT * FROM " + tableName + " WHERE part1 % 400 = 3")) // may be translated to Domain.all
+                .matches("VALUES (VARCHAR 'bar', BIGINT '3', BIGINT '3')");
+        assertThat(query("SELECT * FROM " + tableName + " WHERE part1 % 400 = 3 AND part1 IS NOT NULL"))  // may be translated to Domain.all except nulls
+                .matches("VALUES (VARCHAR 'bar', BIGINT '3', BIGINT '3')");
 
         // we are not constrained by hive.max-partitions-per-scan (=1000) when listing partitions
         assertThat(query("SELECT * FROM " + partitionsTable))
@@ -3731,7 +3735,6 @@ public abstract class BaseHiveConnectorTest
                 "(grape bigint, orange bigint, pear varchar(65535), mango integer, lychee smallint, kiwi tinyint, apple varchar, pineapple varchar(65535))\n" +
                 "WITH (partitioned_by = ARRAY['apple', 'pineapple'])");
 
-        MaterializedResult actual = computeActual("SHOW COLUMNS FROM test_show_columns_partition_key");
         Type unboundedVarchar = canonicalizeType(VARCHAR);
         MaterializedResult expected = resultBuilder(getSession(), unboundedVarchar, unboundedVarchar, unboundedVarchar, unboundedVarchar)
                 .row("grape", canonicalizeType(BIGINT).toString(), "", "")
@@ -3743,7 +3746,7 @@ public abstract class BaseHiveConnectorTest
                 .row("apple", canonicalizeType(VARCHAR).toString(), "partition key", "")
                 .row("pineapple", canonicalizeType(createVarcharType(65535)).toString(), "partition key", "")
                 .build();
-        assertEquals(actual, expected);
+        assertThat(query("SHOW COLUMNS FROM test_show_columns_partition_key")).matches(expected);
     }
 
     // TODO: These should be moved to another class, when more connectors support arrays
@@ -4458,6 +4461,8 @@ public abstract class BaseHiveConnectorTest
                         getSession().getSchema().get())))
                 .hasMessageMatching("Inserting into Hive table with skip.footer.line.count property not supported");
 
+        assertUpdate("DROP TABLE csv_table_skip_footer");
+
         createTableSql = format("" +
                         "CREATE TABLE %s.%s.csv_table_skip_header_footer (\n" +
                         "   name VARCHAR\n" +
@@ -4985,7 +4990,8 @@ public abstract class BaseHiveConnectorTest
                 .row("a ")
                 .build();
 
-        assertEquals(actual, expected);
+        assertThat(actual.getTypes()).isEqualTo(expected.getTypes());
+        assertThat(actual).containsExactlyElementsOf(expected);
     }
 
     /**
@@ -5006,16 +5012,18 @@ public abstract class BaseHiveConnectorTest
 
             assertQuery(
                     "SELECT a, a <= 'bbc' FROM test_table_with_char",
-                    "VALUES (cast('aaa' as char(20)), true), " +
-                            "(cast('bbb' as char(20)), true), " +
-                            "(cast('bbc' as char(20)), true), " +
-                            "(cast('bbd' as char(20)), false)");
+                    "VALUES " +
+                            "('aaa                 ', true), " +
+                            "('bbb                 ', true), " +
+                            "('bbc                 ', true), " +
+                            "('bbd                 ', false)");
 
             assertQuery(
                     "SELECT a FROM test_table_with_char WHERE a <= 'bbc'",
-                    "VALUES cast('aaa' as char(20)), " +
-                            "cast('bbb' as char(20)), " +
-                            "cast('bbc' as char(20))");
+                    "VALUES " +
+                            "'aaa                 ', " +
+                            "'bbb                 ', " +
+                            "'bbc                 '");
         }
         finally {
             assertUpdate("DROP TABLE test_table_with_char");
@@ -6002,11 +6010,10 @@ public abstract class BaseHiveConnectorTest
         return plan -> {
             int actualLocalExchangesCount = searchFrom(plan.getRoot())
                     .where(node -> {
-                        if (!(node instanceof ExchangeNode)) {
+                        if (!(node instanceof ExchangeNode exchangeNode)) {
                             return false;
                         }
 
-                        ExchangeNode exchangeNode = (ExchangeNode) node;
                         return exchangeNode.getScope() == ExchangeNode.Scope.LOCAL && exchangeNode.getType() == ExchangeNode.Type.REPARTITION;
                     })
                     .findAll()
@@ -6032,7 +6039,7 @@ public abstract class BaseHiveConnectorTest
         try {
             assertQuery(
                     "SELECT * FROM test_table_with_char_rc WHERE char_column = 'khaki  '",
-                    "VALUES (CAST('khaki' AS CHAR(7)))");
+                    "VALUES ('khaki  ')");
         }
         finally {
             assertUpdate("DROP TABLE test_table_with_char_rc");
@@ -7142,6 +7149,10 @@ public abstract class BaseHiveConnectorTest
         // Drop stats for 2 partitions
         assertUpdate(format("CALL system.drop_stats('%s', '%s', ARRAY[ARRAY['p2', '7'], ARRAY['p3', '8']])", TPCH_SCHEMA, tableName));
 
+        // Note: Even after deleting stats from metastore, stats for partitioned columns will be present since
+        // we try to estimate them based on available partition information. This will help engine use ndv, min and max
+        // in certain optimizer rules.
+
         // Only stats for the specified partitions should be removed
         // no change
         assertQuery(format("SHOW STATS FOR (SELECT * FROM %s WHERE p_varchar = 'p1' AND p_bigint = 7)", tableName),
@@ -7164,8 +7175,8 @@ public abstract class BaseHiveConnectorTest
                         "('c_timestamp', null, null, null, null, null, null), " +
                         "('c_varchar', null, null, null, null, null, null), " +
                         "('c_varbinary', null, null, null, null, null, null), " +
-                        "('p_varchar', null, null, null, null, null, null), " +
-                        "('p_bigint', null, null, null, null, null, null), " +
+                        "('p_varchar', null, 1.0, 0.0, null, null, null), " +
+                        "('p_bigint', null, 1.0, 0.0, null, '7', '7'), " +
                         "(null, null, null, null, null, null, null)");
         // no change
         assertQuery(format("SHOW STATS FOR (SELECT * FROM %s WHERE p_varchar IS NULL AND p_bigint IS NULL)", tableName),
@@ -7188,8 +7199,8 @@ public abstract class BaseHiveConnectorTest
                         "('c_timestamp', null, null, null, null, null, null), " +
                         "('c_varchar', null, null, null, null, null, null), " +
                         "('c_varbinary', null, null, null, null, null, null), " +
-                        "('p_varchar', null, null, null, null, null, null), " +
-                        "('p_bigint', null, null, null, null, null, null), " +
+                        "('p_varchar', null, 1.0, 0.0, null, null, null), " +
+                        "('p_bigint', null, 1.0, 0.0, null, '8', '8'), " +
                         "(null, null, null, null, null, null, null)");
         assertQuery(format("SHOW STATS FOR (SELECT * FROM %s WHERE p_varchar = 'e1' AND p_bigint = 9)", tableName),
                 "SELECT * FROM VALUES " +
@@ -7225,8 +7236,8 @@ public abstract class BaseHiveConnectorTest
                         "('c_timestamp', null, null, null, null, null, null), " +
                         "('c_varchar', null, null, null, null, null, null), " +
                         "('c_varbinary', null, null, null, null, null, null), " +
-                        "('p_varchar', null, null, null, null, null, null), " +
-                        "('p_bigint', null, null, null, null, null, null), " +
+                        "('p_varchar', null, 1.0, 0.0, null, null, null), " +
+                        "('p_bigint', null, 1.0, 0.0, null, '7', '7'), " +
                         "(null, null, null, null, null, null, null)");
         assertQuery(format("SHOW STATS FOR (SELECT * FROM %s WHERE p_varchar = 'p2' AND p_bigint = 7)", tableName),
                 "SELECT * FROM VALUES " +
@@ -7236,8 +7247,8 @@ public abstract class BaseHiveConnectorTest
                         "('c_timestamp', null, null, null, null, null, null), " +
                         "('c_varchar', null, null, null, null, null, null), " +
                         "('c_varbinary', null, null, null, null, null, null), " +
-                        "('p_varchar', null, null, null, null, null, null), " +
-                        "('p_bigint', null, null, null, null, null, null), " +
+                        "('p_varchar', null, 1.0, 0.0, null, null, null), " +
+                        "('p_bigint', null, 1.0, 0.0, null, '7', '7'), " +
                         "(null, null, null, null, null, null, null)");
         assertQuery(format("SHOW STATS FOR (SELECT * FROM %s WHERE p_varchar IS NULL AND p_bigint IS NULL)", tableName),
                 "SELECT * FROM VALUES " +
@@ -7247,8 +7258,8 @@ public abstract class BaseHiveConnectorTest
                         "('c_timestamp', null, null, null, null, null, null), " +
                         "('c_varchar', null, null, null, null, null, null), " +
                         "('c_varbinary', null, null, null, null, null, null), " +
-                        "('p_varchar', null, null, null, null, null, null), " +
-                        "('p_bigint', null, null, null, null, null, null), " +
+                        "('p_varchar', null, 0.0, 1.0, null, null, null), " +
+                        "('p_bigint', null, 0.0, 1.0, null, null, null), " +
                         "(null, null, null, null, null, null, null)");
         assertQuery(format("SHOW STATS FOR (SELECT * FROM %s WHERE p_varchar = 'p3' AND p_bigint = 8)", tableName),
                 "SELECT * FROM VALUES " +
@@ -7258,8 +7269,8 @@ public abstract class BaseHiveConnectorTest
                         "('c_timestamp', null, null, null, null, null, null), " +
                         "('c_varchar', null, null, null, null, null, null), " +
                         "('c_varbinary', null, null, null, null, null, null), " +
-                        "('p_varchar', null, null, null, null, null, null), " +
-                        "('p_bigint', null, null, null, null, null, null), " +
+                        "('p_varchar', null, 1.0, 0.0, null, null, null), " +
+                        "('p_bigint', null, 1.0, 0.0, null, '8', '8'), " +
                         "(null, null, null, null, null, null, null)");
         assertQuery(format("SHOW STATS FOR (SELECT * FROM %s WHERE p_varchar = 'e1' AND p_bigint = 9)", tableName),
                 "SELECT * FROM VALUES " +
@@ -7269,8 +7280,8 @@ public abstract class BaseHiveConnectorTest
                         "('c_timestamp', null, null, null, null, null, null), " +
                         "('c_varchar', null, null, null, null, null, null), " +
                         "('c_varbinary', null, null, null, null, null, null), " +
-                        "('p_varchar', null, null, null, null, null, null), " +
-                        "('p_bigint', null, null, null, null, null, null), " +
+                        "('p_varchar', null, 1.0, 0.0, null, null, null), " +
+                        "('p_bigint', null, 1.0, 0.0, null, '9', '9'), " +
                         "(null, null, null, null, null, null, null)");
         assertQuery(format("SHOW STATS FOR (SELECT * FROM %s WHERE p_varchar = 'e2' AND p_bigint = 9)", tableName),
                 "SELECT * FROM VALUES " +
@@ -7280,8 +7291,8 @@ public abstract class BaseHiveConnectorTest
                         "('c_timestamp', null, null, null, null, null, null), " +
                         "('c_varchar', null, null, null, null, null, null), " +
                         "('c_varbinary', null, null, null, null, null, null), " +
-                        "('p_varchar', null, null, null, null, null, null), " +
-                        "('p_bigint', null, null, null, null, null, null), " +
+                        "('p_varchar', null, 1.0, 0.0, null, null, null), " +
+                        "('p_bigint', null, 1.0, 0.0, null, '9', '9'), " +
                         "(null, null, null, null, null, null, null)");
 
         // All table stats are gone
@@ -7294,8 +7305,8 @@ public abstract class BaseHiveConnectorTest
                         "('c_timestamp', null, null, null, null, null, null), " +
                         "('c_varchar', null, null, null, null, null, null), " +
                         "('c_varbinary', null, null, null, null, null, null), " +
-                        "('p_varchar', null, null, null, null, null, null), " +
-                        "('p_bigint', null, null, null, null, null, null), " +
+                        "('p_varchar', null, 5.0, 0.16666666666666666, null, null, null), " +
+                        "('p_bigint', null, 3.0, 0.16666666666666666, null, '7', '9'), " +
                         "(null, null, null, null, null, null, null)");
 
         assertUpdate("DROP TABLE " + tableName);
@@ -8424,7 +8435,7 @@ public abstract class BaseHiveConnectorTest
     {
         assertExplainAnalyze(
                 "EXPLAIN ANALYZE SELECT * FROM nation a",
-                "Physical Input: .*B");
+                "Physical input: .*B");
     }
 
     @Test
@@ -8432,7 +8443,10 @@ public abstract class BaseHiveConnectorTest
     {
         assertExplainAnalyze(
                 "EXPLAIN ANALYZE VERBOSE SELECT * FROM nation a",
-                "'Physical input read time' = \\{duration=.*}");
+                "Physical input time: .*s");
+        assertExplainAnalyze(
+                "EXPLAIN ANALYZE VERBOSE SELECT * FROM nation WHERE nationkey > 1",
+                "Physical input time: .*s");
     }
 
     @Test
@@ -8582,6 +8596,10 @@ public abstract class BaseHiveConnectorTest
         for (HiveStorageFormat hiveStorageFormat : HiveStorageFormat.values()) {
             if (hiveStorageFormat == HiveStorageFormat.CSV) {
                 // CSV supports only unbounded VARCHAR type
+                continue;
+            }
+            if (hiveStorageFormat == REGEX) {
+                // REGEX format is read-only
                 continue;
             }
             if (hiveStorageFormat == HiveStorageFormat.PARQUET) {

@@ -39,9 +39,9 @@ import java.util.Optional;
 import static io.trino.memory.LowMemoryKillerTestingUtils.taskId;
 import static io.trino.memory.LowMemoryKillerTestingUtils.toNodeMemoryInfoList;
 import static io.trino.memory.LowMemoryKillerTestingUtils.toRunningQueryInfoList;
-import static io.trino.testing.assertions.Assert.assertEquals;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static java.util.concurrent.TimeUnit.SECONDS;
+import static org.testng.Assert.assertEquals;
 
 public class TestLeastWastedEffortTaskLowMemoryKiller
 {
@@ -233,6 +233,7 @@ public class TestLeastWastedEffortTaskLowMemoryKiller
                         OutputBufferStatus.initial(),
                         DataSize.of(0, DataSize.Unit.MEGABYTE),
                         DataSize.of(1, DataSize.Unit.MEGABYTE),
+                        Optional.of(1),
                         DataSize.of(1, DataSize.Unit.MEGABYTE),
                         DataSize.of(1, DataSize.Unit.MEGABYTE),
                         DataSize.of(0, DataSize.Unit.MEGABYTE),
@@ -294,6 +295,7 @@ public class TestLeastWastedEffortTaskLowMemoryKiller
                         0,
                         new Duration(0, MILLISECONDS),
                         DataSize.ofBytes(0),
+                        Optional.empty(),
                         0,
                         new Duration(0, MILLISECONDS),
                         ImmutableList.of()),

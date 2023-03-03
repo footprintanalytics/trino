@@ -23,6 +23,7 @@ import io.trino.Session;
 import io.trino.connector.MockConnectorFactory;
 import io.trino.connector.MockConnectorPlugin;
 import io.trino.connector.MockConnectorTableHandle;
+import io.trino.metadata.QualifiedObjectName;
 import io.trino.metadata.SystemSecurityMetadata;
 import io.trino.plugin.base.security.AllowAllSystemAccessControl;
 import io.trino.plugin.base.security.DefaultSystemAccessControl;
@@ -46,12 +47,14 @@ import io.trino.spi.security.SelectedRole;
 import io.trino.spi.security.SystemAccessControl;
 import io.trino.spi.security.SystemSecurityContext;
 import io.trino.spi.security.TrinoPrincipal;
+import io.trino.spi.security.ViewExpression;
 import io.trino.testing.AbstractTestQueryFramework;
 import io.trino.testing.DataProviders;
 import io.trino.testing.DistributedQueryRunner;
 import io.trino.testing.QueryRunner;
 import io.trino.testing.TestingAccessControlManager;
 import io.trino.testing.TestingAccessControlManager.TestingPrivilege;
+import io.trino.testing.TestingGroupProvider;
 import io.trino.testing.TestingSession;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.Test;
@@ -111,6 +114,7 @@ public class TestAccessControl
         extends AbstractTestQueryFramework
 {
     private final AtomicReference<SystemAccessControl> systemAccessControl = new AtomicReference<>(new DefaultSystemAccessControl());
+    private final TestingGroupProvider groupProvider = new TestingGroupProvider();
     private TestingSystemSecurityMetadata systemSecurityMetadata;
 
     @Override
@@ -137,6 +141,7 @@ public class TestAccessControl
                     }
                 })
                 .build();
+        queryRunner.getGroupProvider().setConfiguredGroupProvider(groupProvider);
         queryRunner.installPlugin(new BlackHolePlugin());
         queryRunner.createCatalog("blackhole", "blackhole");
         queryRunner.installPlugin(new MemoryPlugin());
@@ -206,8 +211,8 @@ public class TestAccessControl
                         stringProperty("string_column_property", "description", "", false)))
                 .build()));
         queryRunner.createCatalog("mock", "mock");
-        queryRunner.installPlugin(new JdbcPlugin("base-jdbc", new TestingH2JdbcModule()));
-        queryRunner.createCatalog("jdbc", "base-jdbc", TestingH2JdbcModule.createProperties());
+        queryRunner.installPlugin(new JdbcPlugin("base_jdbc", new TestingH2JdbcModule()));
+        queryRunner.createCatalog("jdbc", "base_jdbc", TestingH2JdbcModule.createProperties());
         for (String tableName : ImmutableList.of("orders", "nation", "region", "lineitem")) {
             queryRunner.execute(format("CREATE TABLE %1$s AS SELECT * FROM tpch.tiny.%1$s WITH NO DATA", tableName));
         }
@@ -222,7 +227,7 @@ public class TestAccessControl
         requireNonNull(systemSecurityMetadata, "systemSecurityMetadata is null")
                 .reset();
         getQueryRunner().getAccessControl().reset();
-        getQueryRunner().getGroupProvider().reset();
+        groupProvider.reset();
     }
 
     @Test
@@ -363,7 +368,7 @@ public class TestAccessControl
                 .hasMessageMatching("Access Denied: View owner does not have sufficient privileges: View owner 'test_view_access_owner' cannot create view that selects from \\w+.\\w+.orders");
 
         // verify view can be queried when owner is in group
-        getQueryRunner().getGroupProvider().setUserGroups(ImmutableMap.of(viewOwnerSession.getUser(), ImmutableSet.of("testgroup")));
+        groupProvider.setUserGroups(ImmutableMap.of(viewOwnerSession.getUser(), ImmutableSet.of("testgroup")));
         getQueryRunner().execute(getSession(), "SELECT * FROM " + columnAccessViewName);
 
         // change access denied exception to view
@@ -952,6 +957,35 @@ public class TestAccessControl
         assertAccessAllowed("CREATE TABLE mock.default.new_table (pk bigint)");
         assertAccessAllowed("CREATE SCHEMA mock.new_schema");
         assertAccessAllowed("CREATE MATERIALIZED VIEW mock.default.new_materialized_view AS SELECT 1 a");
+    }
+
+    @Test
+    public void testAccessControlWithGroupsAndColumnMask()
+    {
+        groupProvider.setUserGroups(ImmutableMap.of(getSession().getUser(), ImmutableSet.of("group")));
+        TestingAccessControlManager accessControlManager = getQueryRunner().getAccessControl();
+        accessControlManager.denyIdentityTable((identity, table) -> (identity.getGroups().contains("group") && "orders".equals(table)));
+        accessControlManager.columnMask(
+                new QualifiedObjectName("blackhole", "default", "orders"),
+                "comment",
+                getSession().getUser(),
+                new ViewExpression(getSession().getUser(), Optional.empty(), Optional.empty(), "substr(comment,1,3)"));
+
+        assertAccessAllowed("SELECT comment FROM orders");
+    }
+
+    @Test
+    public void testAccessControlWithGroupsAndRowFilter()
+    {
+        groupProvider.setUserGroups(ImmutableMap.of(getSession().getUser(), ImmutableSet.of("group")));
+        TestingAccessControlManager accessControlManager = getQueryRunner().getAccessControl();
+        accessControlManager.denyIdentityTable((identity, table) -> (identity.getGroups().contains("group") && "nation".equals(table)));
+        accessControlManager.rowFilter(
+                new QualifiedObjectName("blackhole", "default", "nation"),
+                getSession().getUser(),
+                new ViewExpression(getSession().getUser(), Optional.empty(), Optional.empty(), "nationkey % 2 = 0"));
+
+        assertAccessAllowed("SELECT nationkey FROM nation");
     }
 
     private static final class DenySetPropertiesSystemAccessControl

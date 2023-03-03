@@ -68,18 +68,18 @@ public class InMemoryRecordSet
         return new InMemoryRecordCursor(types, records.iterator());
     }
 
-    private static class InMemoryRecordCursor
+    public static class InMemoryRecordCursor
             implements RecordCursor
     {
         private final List<Type> types;
-        private final Iterator<? extends List<?>> records;
+        private Iterator<? extends List<?>> records;
         private List<?> record;
         private long completedBytes;
 
-        private InMemoryRecordCursor(List<Type> types, Iterator<? extends List<?>> records)
+        protected InMemoryRecordCursor(List<Type> types, Iterator<? extends List<?>> records)
         {
-            this.types = types;
-            this.records = records;
+            this.types = requireNonNull(types, "types is null");
+            this.records = requireNonNull(records, "records is null");
         }
 
         @Override
@@ -174,6 +174,8 @@ public class InMemoryRecordSet
         @Override
         public void close()
         {
+            records = null;
+            record = null;
         }
     }
 

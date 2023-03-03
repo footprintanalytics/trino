@@ -53,7 +53,6 @@ public class TestHiveConfig
                 .setMaxSplitsPerSecond(null)
                 .setDomainCompactionThreshold(100)
                 .setTargetMaxFileSize(DataSize.of(1, Unit.GIGABYTE))
-                .setWriterSortBufferSize(DataSize.of(64, Unit.MEGABYTE))
                 .setForceLocalScheduling(false)
                 .setMaxConcurrentFileSystemOperations(20)
                 .setMaxConcurrentMetastoreDrops(20)
@@ -71,7 +70,6 @@ public class TestHiveConfig
                 .setSortedWritingEnabled(true)
                 .setPropagateTableScanSortingProperties(false)
                 .setMaxPartitionsPerWriter(100)
-                .setMaxOpenSortFiles(50)
                 .setWriteValidationThreads(16)
                 .setValidateBucketing(true)
                 .setParallelPartitionedBucketedWrites(true)
@@ -116,6 +114,7 @@ public class TestHiveConfig
                 .setSizeBasedSplitWeightsEnabled(true)
                 .setMinimumAssignedSplitWeight(0.05)
                 .setDeltaLakeCatalogName(null)
+                .setHudiCatalogName(null)
                 .setAutoPurge(false)
                 .setPartitionProjectionEnabled(false));
     }
@@ -140,7 +139,6 @@ public class TestHiveConfig
                 .put("hive.max-splits-per-second", "1")
                 .put("hive.domain-compaction-threshold", "42")
                 .put("hive.target-max-file-size", "72MB")
-                .put("hive.writer-sort-buffer-size", "13MB")
                 .put("hive.recursive-directories", "true")
                 .put("hive.ignore-absent-partitions", "true")
                 .put("hive.storage-format", "SEQUENCEFILE")
@@ -151,7 +149,6 @@ public class TestHiveConfig
                 .put("hive.create-empty-bucket-files", "true")
                 .put("hive.delete-schema-locations-fallback", "true")
                 .put("hive.max-partitions-per-writers", "222")
-                .put("hive.max-open-sort-files", "333")
                 .put("hive.write-validation-threads", "11")
                 .put("hive.validate-bucketing", "false")
                 .put("hive.parallel-partitioned-bucketed-writes", "false")
@@ -203,6 +200,7 @@ public class TestHiveConfig
                 .put("hive.size-based-split-weights-enabled", "false")
                 .put("hive.minimum-assigned-split-weight", "1.0")
                 .put("hive.delta-lake-catalog-name", "delta")
+                .put("hive.hudi-catalog-name", "hudi")
                 .put("hive.auto-purge", "true")
                 .put(CONFIGURATION_HIVE_PARTITION_PROJECTION_ENABLED, "true")
                 .buildOrThrow();
@@ -224,7 +222,6 @@ public class TestHiveConfig
                 .setMaxSplitsPerSecond(1)
                 .setDomainCompactionThreshold(42)
                 .setTargetMaxFileSize(DataSize.of(72, Unit.MEGABYTE))
-                .setWriterSortBufferSize(DataSize.of(13, Unit.MEGABYTE))
                 .setForceLocalScheduling(true)
                 .setMaxConcurrentFileSystemOperations(100)
                 .setMaxConcurrentMetastoreDrops(100)
@@ -240,7 +237,6 @@ public class TestHiveConfig
                 .setCreateEmptyBucketFiles(true)
                 .setDeleteSchemaLocationsFallback(true)
                 .setMaxPartitionsPerWriter(222)
-                .setMaxOpenSortFiles(333)
                 .setWriteValidationThreads(11)
                 .setValidateBucketing(false)
                 .setParallelPartitionedBucketedWrites(false)
@@ -287,6 +283,7 @@ public class TestHiveConfig
                 .setSizeBasedSplitWeightsEnabled(false)
                 .setMinimumAssignedSplitWeight(1.0)
                 .setDeltaLakeCatalogName("delta")
+                .setHudiCatalogName("hudi")
                 .setAutoPurge(true)
                 .setPartitionProjectionEnabled(true);
 

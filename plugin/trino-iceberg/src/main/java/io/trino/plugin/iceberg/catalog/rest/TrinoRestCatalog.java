@@ -35,6 +35,7 @@ import io.trino.spi.security.TrinoPrincipal;
 import org.apache.iceberg.BaseTable;
 import org.apache.iceberg.PartitionSpec;
 import org.apache.iceberg.Schema;
+import org.apache.iceberg.SortOrder;
 import org.apache.iceberg.Table;
 import org.apache.iceberg.Transaction;
 import org.apache.iceberg.catalog.Namespace;
@@ -195,11 +196,13 @@ public class TrinoRestCatalog
             SchemaTableName schemaTableName,
             Schema schema,
             PartitionSpec partitionSpec,
+            SortOrder sortOrder,
             String location,
             Map<String, String> properties)
     {
         return restSessionCatalog.buildTable(convert(session), toIdentifier(schemaTableName), schema)
                 .withPartitionSpec(partitionSpec)
+                .withSortOrder(sortOrder)
                 .withLocation(location)
                 .withProperties(properties)
                 .createTransaction();
@@ -212,9 +215,15 @@ public class TrinoRestCatalog
     }
 
     @Override
+    public void unregisterTable(ConnectorSession session, SchemaTableName tableName)
+    {
+        throw new TrinoException(NOT_SUPPORTED, "unregisterTable is not supported for Iceberg REST catalogs");
+    }
+
+    @Override
     public void dropTable(ConnectorSession session, SchemaTableName schemaTableName)
     {
-        if (!restSessionCatalog.dropTable(convert(session), toIdentifier(schemaTableName))) {
+        if (!restSessionCatalog.purgeTable(convert(session), toIdentifier(schemaTableName))) {
             throw new TrinoException(ICEBERG_CATALOG_ERROR, format("Failed to drop table: %s", schemaTableName));
         }
     }

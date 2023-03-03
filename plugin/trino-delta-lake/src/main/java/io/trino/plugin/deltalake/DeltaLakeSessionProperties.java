@@ -51,10 +51,10 @@ public final class DeltaLakeSessionProperties
     private static final String PARQUET_MAX_READ_BLOCK_ROW_COUNT = "parquet.max_read_block_row_count";
     private static final String PARQUET_USE_COLUMN_INDEX = "parquet_use_column_index";
     private static final String PARQUET_OPTIMIZED_READER_ENABLED = "parquet_optimized_reader_enabled";
+    private static final String PARQUET_OPTIMIZED_NESTED_READER_ENABLED = "parquet_optimized_nested_reader_enabled";
     private static final String PARQUET_WRITER_BLOCK_SIZE = "parquet_writer_block_size";
     private static final String PARQUET_WRITER_PAGE_SIZE = "parquet_writer_page_size";
     private static final String TARGET_MAX_FILE_SIZE = "target_max_file_size";
-    private static final String PARQUET_OPTIMIZED_WRITER_ENABLED = "parquet_optimized_writer_enabled"; // = HiveSessionProperties#PARQUET_OPTIMIZED_WRITER_ENABLED
     private static final String COMPRESSION_CODEC = "compression_codec";
     // This property is not supported by Delta Lake and exists solely for technical reasons.
     @Deprecated
@@ -62,6 +62,7 @@ public final class DeltaLakeSessionProperties
     private static final String DYNAMIC_FILTERING_WAIT_TIMEOUT = "dynamic_filtering_wait_timeout";
     private static final String TABLE_STATISTICS_ENABLED = "statistics_enabled";
     public static final String EXTENDED_STATISTICS_ENABLED = "extended_statistics_enabled";
+    public static final String EXTENDED_STATISTICS_COLLECT_ON_WRITE = "extended_statistics_collect_on_write";
     public static final String LEGACY_CREATE_TABLE_WITH_EXISTING_LOCATION_ENABLED = "legacy_create_table_with_existing_location_enabled";
 
     private final List<PropertyMetadata<?>> sessionProperties;
@@ -122,6 +123,11 @@ public final class DeltaLakeSessionProperties
                         "Use optimized Parquet reader",
                         parquetReaderConfig.isOptimizedReaderEnabled(),
                         false),
+                booleanProperty(
+                        PARQUET_OPTIMIZED_NESTED_READER_ENABLED,
+                        "Use optimized Parquet reader for nested columns",
+                        parquetReaderConfig.isOptimizedNestedReaderEnabled(),
+                        false),
                 dataSizeProperty(
                         PARQUET_WRITER_BLOCK_SIZE,
                         "Parquet: Writer block size",
@@ -136,11 +142,6 @@ public final class DeltaLakeSessionProperties
                         TARGET_MAX_FILE_SIZE,
                         "Target maximum size of written files; the actual size may be larger",
                         deltaLakeConfig.getTargetMaxFileSize(),
-                        false),
-                booleanProperty(
-                        PARQUET_OPTIMIZED_WRITER_ENABLED,
-                        "Enable optimized writer",
-                        parquetWriterConfig.isParquetOptimizedWriterEnabled(),
                         false),
                 enumProperty(
                         TIMESTAMP_PRECISION,
@@ -161,7 +162,7 @@ public final class DeltaLakeSessionProperties
                         false),
                 booleanProperty(
                         EXTENDED_STATISTICS_ENABLED,
-                        "Use extended statistics collected by ANALYZE",
+                        "Enable collection (ANALYZE) and use of extended statistics.",
                         deltaLakeConfig.isExtendedStatisticsEnabled(),
                         false),
                 booleanProperty(
@@ -169,11 +170,21 @@ public final class DeltaLakeSessionProperties
                         "Enable using the CREATE TABLE statement to register an existing table",
                         deltaLakeConfig.isLegacyCreateTableWithExistingLocationEnabled(),
                         false),
+                booleanProperty(
+                        EXTENDED_STATISTICS_COLLECT_ON_WRITE,
+                        "Enables automatic column level extended statistics collection on write",
+                        deltaLakeConfig.isCollectExtendedStatisticsOnWrite(),
+                        false),
                 enumProperty(
                         COMPRESSION_CODEC,
                         "Compression codec to use when writing new data files",
                         HiveCompressionCodec.class,
                         deltaLakeConfig.getCompressionCodec(),
+                        value -> {
+                            if (value == HiveCompressionCodec.LZ4) {
+                                throw new TrinoException(INVALID_SESSION_PROPERTY, "Unsupported codec: LZ4");
+                            }
+                        },
                         false));
     }
 
@@ -223,9 +234,9 @@ public final class DeltaLakeSessionProperties
         return session.getProperty(PARQUET_OPTIMIZED_READER_ENABLED, Boolean.class);
     }
 
-    public static boolean isParquetOptimizedWriterEnabled(ConnectorSession session)
+    public static boolean isParquetOptimizedNestedReaderEnabled(ConnectorSession session)
     {
-        return session.getProperty(PARQUET_OPTIMIZED_WRITER_ENABLED, Boolean.class);
+        return session.getProperty(PARQUET_OPTIMIZED_NESTED_READER_ENABLED, Boolean.class);
     }
 
     public static DataSize getParquetWriterBlockSize(ConnectorSession session)
@@ -262,6 +273,11 @@ public final class DeltaLakeSessionProperties
     public static boolean isLegacyCreateTableWithExistingLocationEnabled(ConnectorSession session)
     {
         return session.getProperty(LEGACY_CREATE_TABLE_WITH_EXISTING_LOCATION_ENABLED, Boolean.class);
+    }
+
+    public static boolean isCollectExtendedStatisticsColumnStatisticsOnWrite(ConnectorSession session)
+    {
+        return session.getProperty(EXTENDED_STATISTICS_COLLECT_ON_WRITE, Boolean.class);
     }
 
     public static HiveCompressionCodec getCompressionCodec(ConnectorSession session)

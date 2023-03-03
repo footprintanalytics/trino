@@ -34,8 +34,10 @@ import io.airlift.jaxrs.JaxrsModule;
 import io.airlift.jmx.testing.TestingJmxModule;
 import io.airlift.json.JsonModule;
 import io.airlift.node.testing.TestingNodeModule;
+import io.airlift.openmetrics.JmxOpenMetricsModule;
 import io.airlift.tracetoken.TraceTokenModule;
 import io.trino.connector.CatalogManagerModule;
+import io.trino.connector.ConnectorName;
 import io.trino.connector.ConnectorServicesProvider;
 import io.trino.cost.StatsCalculator;
 import io.trino.dispatcher.DispatchManager;
@@ -66,7 +68,7 @@ import io.trino.security.AccessControlConfig;
 import io.trino.security.AccessControlManager;
 import io.trino.security.GroupProviderManager;
 import io.trino.server.GracefulShutdownHandler;
-import io.trino.server.PluginManager;
+import io.trino.server.PluginInstaller;
 import io.trino.server.Server;
 import io.trino.server.ServerMainModule;
 import io.trino.server.SessionPropertyDefaults;
@@ -92,6 +94,7 @@ import io.trino.testing.ProcedureTester;
 import io.trino.testing.TestingAccessControlManager;
 import io.trino.testing.TestingEventListenerManager;
 import io.trino.testing.TestingGroupProvider;
+import io.trino.testing.TestingGroupProviderManager;
 import io.trino.testing.TestingWarningCollectorModule;
 import io.trino.transaction.TransactionManager;
 import io.trino.transaction.TransactionManagerModule;
@@ -141,7 +144,7 @@ public class TestingTrinoServer
     private final Path baseDataDir;
     private final boolean preserveData;
     private final LifeCycleManager lifeCycleManager;
-    private final PluginManager pluginManager;
+    private final PluginInstaller pluginInstaller;
     private final Optional<CatalogManager> catalogManager;
     private final TestingHttpServer server;
     private final TransactionManager transactionManager;
@@ -154,7 +157,7 @@ public class TestingTrinoServer
     private final StatsCalculator statsCalculator;
     private final ProcedureRegistry procedureRegistry;
     private final TestingAccessControlManager accessControl;
-    private final TestingGroupProvider groupProvider;
+    private final TestingGroupProviderManager groupProvider;
     private final ProcedureTester procedureTester;
     private final Optional<InternalResourceGroupManager<?>> resourceGroupManager;
     private final SessionPropertyDefaults sessionPropertyDefaults;
@@ -239,7 +242,7 @@ public class TestingTrinoServer
         if (coordinator) {
             // TODO: enable failure detector
             serverProperties.put("failure-detector.enabled", "false");
-            serverProperties.put("catalog.store", "none");
+            serverProperties.put("catalog.store", "memory");
 
             // Reduce memory footprint in tests
             serverProperties.put("query.min-expire-age", "5s");
@@ -254,6 +257,7 @@ public class TestingTrinoServer
                 .add(new JaxrsModule())
                 .add(new MBeanModule())
                 .add(new TestingJmxModule())
+                .add(new JmxOpenMetricsModule())
                 .add(new EventModule())
                 .add(new TraceTokenModule())
                 .add(new ServerSecurityModule())
@@ -269,8 +273,9 @@ public class TestingTrinoServer
                     binder.bind(TestingEventListenerManager.class).in(Scopes.SINGLETON);
                     binder.bind(AccessControlManager.class).to(TestingAccessControlManager.class).in(Scopes.SINGLETON);
                     binder.bind(EventListenerManager.class).to(TestingEventListenerManager.class).in(Scopes.SINGLETON);
-                    binder.bind(GroupProviderManager.class).in(Scopes.SINGLETON);
-                    binder.bind(GroupProvider.class).to(TestingGroupProvider.class).in(Scopes.SINGLETON);
+                    binder.bind(TestingGroupProviderManager.class).in(Scopes.SINGLETON);
+                    binder.bind(GroupProvider.class).to(TestingGroupProviderManager.class).in(Scopes.SINGLETON);
+                    binder.bind(GroupProviderManager.class).to(TestingGroupProviderManager.class).in(Scopes.SINGLETON);
                     binder.bind(AccessControl.class).to(AccessControlManager.class).in(Scopes.SINGLETON);
                     binder.bind(ShutdownAction.class).to(TestShutdownAction.class).in(Scopes.SINGLETON);
                     binder.bind(GracefulShutdownHandler.class).in(Scopes.SINGLETON);
@@ -305,7 +310,7 @@ public class TestingTrinoServer
 
         lifeCycleManager = injector.getInstance(LifeCycleManager.class);
 
-        pluginManager = injector.getInstance(PluginManager.class);
+        pluginInstaller = injector.getInstance(PluginInstaller.class);
 
         Optional<CatalogManager> catalogManager = Optional.empty();
         if (injector.getExistingBinding(Key.get(CatalogManager.class)) != null) {
@@ -320,7 +325,7 @@ public class TestingTrinoServer
         typeManager = injector.getInstance(TypeManager.class);
         functionManager = injector.getInstance(FunctionManager.class);
         accessControl = injector.getInstance(TestingAccessControlManager.class);
-        groupProvider = injector.getInstance(TestingGroupProvider.class);
+        groupProvider = injector.getInstance(TestingGroupProviderManager.class);
         procedureTester = injector.getInstance(ProcedureTester.class);
         splitManager = injector.getInstance(SplitManager.class);
         pageSourceManager = injector.getInstance(PageSourceManager.class);
@@ -390,7 +395,7 @@ public class TestingTrinoServer
 
     public void installPlugin(Plugin plugin)
     {
-        pluginManager.installPlugin(plugin, ignored -> plugin.getClass().getClassLoader());
+        pluginInstaller.installPlugin(plugin, ignored -> plugin.getClass().getClassLoader());
     }
 
     public DispatchManager getDispatchManager()
@@ -429,7 +434,7 @@ public class TestingTrinoServer
             // this is a worker so catalogs are dynamically registered
             return;
         }
-        catalogManager.get().createCatalog(catalogName, connectorName, properties);
+        catalogManager.get().createCatalog(catalogName, new ConnectorName(connectorName), properties, false);
     }
 
     public void loadExchangeManager(String name, Map<String, String> properties)
@@ -533,7 +538,7 @@ public class TestingTrinoServer
         return accessControl;
     }
 
-    public TestingGroupProvider getGroupProvider()
+    public TestingGroupProviderManager getGroupProvider()
     {
         return groupProvider;
     }

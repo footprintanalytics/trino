@@ -17,6 +17,8 @@ import com.fasterxml.jackson.core.JsonParseException;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.failsafe.Failsafe;
+import dev.failsafe.RetryPolicy;
 import io.airlift.json.ObjectMapperProvider;
 import io.airlift.log.Logger;
 import io.trino.filesystem.TrinoFileSystem;
@@ -29,8 +31,6 @@ import io.trino.spi.type.DecimalType;
 import io.trino.spi.type.Decimals;
 import io.trino.spi.type.StandardTypes;
 import io.trino.spi.type.Type;
-import net.jodah.failsafe.Failsafe;
-import net.jodah.failsafe.RetryPolicy;
 import org.apache.hadoop.fs.Path;
 
 import javax.annotation.Nullable;
@@ -206,7 +206,7 @@ public final class TransactionLogParser
             }
         }
         catch (RuntimeException e) {
-            return new TrinoException(
+            throw new TrinoException(
                     GENERIC_INTERNAL_ERROR,
                     format("Unable to parse value [%s] from column %s with type %s", valueString, column.getName(), column.getType()),
                     e);
@@ -219,14 +219,15 @@ public final class TransactionLogParser
 
     static Optional<LastCheckpoint> readLastCheckpoint(TrinoFileSystem fileSystem, Path tableLocation)
     {
-        return Failsafe.with(new RetryPolicy<>()
+        return Failsafe.with(RetryPolicy.builder()
                         .withMaxRetries(5)
                         .withDelay(Duration.ofSeconds(1))
                         .onRetry(event -> {
                             // The _last_checkpoint file is malformed, it's probably in the middle of a rewrite (file rewrites on Azure are NOT atomic)
                             // Retry several times with a short delay, and if that fails, fall back to manually finding latest checkpoint.
-                            log.debug(event.getLastFailure(), "Failure when accessing last checkpoint information, will be retried");
-                        }))
+                            log.debug(event.getLastException(), "Failure when accessing last checkpoint information, will be retried");
+                        })
+                        .build())
                 .get(() -> tryReadLastCheckpoint(fileSystem, tableLocation));
     }
 
@@ -235,7 +236,7 @@ public final class TransactionLogParser
     {
         Path checkpointPath = new Path(getTransactionLogDir(tableLocation), LAST_CHECKPOINT_FILENAME);
         TrinoInputFile inputFile = fileSystem.newInputFile(checkpointPath.toString());
-        try (InputStream lastCheckpointInput = inputFile.newInput().inputStream()) {
+        try (InputStream lastCheckpointInput = inputFile.newStream()) {
             // Note: there apparently is 8K buffering applied and _last_checkpoint should be much smaller.
             return Optional.of(JsonUtils.parseJson(OBJECT_MAPPER, lastCheckpointInput, LastCheckpoint.class));
         }

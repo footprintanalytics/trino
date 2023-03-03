@@ -81,8 +81,7 @@ public class SlicePositionsAppender
             return;
         }
         ensurePositionCapacity(positionCount + positions.size());
-        if (block instanceof VariableWidthBlock) {
-            VariableWidthBlock variableWidthBlock = (VariableWidthBlock) block;
+        if (block instanceof VariableWidthBlock variableWidthBlock) {
             int newByteCount = 0;
             int[] lengths = new int[positions.size()];
             int[] sourceOffsets = new int[positions.size()];
@@ -138,6 +137,35 @@ public class SlicePositionsAppender
         else {
             hasNonNullValue = true;
             duplicateBytes(block.getSlice(0, 0, block.getSliceLength(0)), rlePositionCount);
+        }
+    }
+
+    @Override
+    public void append(int position, Block source)
+    {
+        ensurePositionCapacity(positionCount + 1);
+        if (source.isNull(position)) {
+            valueIsNull[positionCount] = true;
+            offsets[positionCount + 1] = getCurrentOffset();
+            positionCount++;
+
+            hasNullValue = true;
+            updateSize(1, 0);
+        }
+        else {
+            hasNonNullValue = true;
+            int currentOffset = getCurrentOffset();
+            int sliceLength = source.getSliceLength(position);
+            Slice slice = source.getSlice(position, 0, sliceLength);
+
+            ensureExtraBytesCapacity(sliceLength);
+
+            slice.getBytes(0, bytes, currentOffset, sliceLength);
+
+            offsets[positionCount + 1] = currentOffset + sliceLength;
+
+            positionCount++;
+            updateSize(1, sliceLength);
         }
     }
 

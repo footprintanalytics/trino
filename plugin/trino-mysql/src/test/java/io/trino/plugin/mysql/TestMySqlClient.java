@@ -38,9 +38,9 @@ import static io.trino.spi.type.BigintType.BIGINT;
 import static io.trino.spi.type.BooleanType.BOOLEAN;
 import static io.trino.spi.type.DoubleType.DOUBLE;
 import static io.trino.testing.TestingConnectorSession.SESSION;
-import static io.trino.testing.assertions.Assert.assertEquals;
 import static io.trino.type.InternalTypeManager.TESTING_TYPE_MANAGER;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertTrue;
 
 public class TestMySqlClient
@@ -66,7 +66,7 @@ public class TestMySqlClient
             session -> {
                 throw new UnsupportedOperationException();
             },
-            new DefaultQueryBuilder(),
+            new DefaultQueryBuilder(RemoteQueryModifier.NONE),
             TESTING_TYPE_MANAGER,
             new DefaultIdentifierMapping(),
             RemoteQueryModifier.NONE);
