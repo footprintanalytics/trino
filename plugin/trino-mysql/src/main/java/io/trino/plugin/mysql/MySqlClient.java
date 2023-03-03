@@ -194,12 +194,14 @@ public class MySqlClient
 
     private final Type jsonType;
     private final boolean statisticsEnabled;
+    private final int datetimeColumnSize;
     private final ConnectorExpressionRewriter<String> connectorExpressionRewriter;
     private final AggregateFunctionRewriter<JdbcExpression, String> aggregateFunctionRewriter;
 
     @Inject
     public MySqlClient(
             BaseJdbcConfig config,
+            MySqlConfig mySqlConfig,
             JdbcStatisticsConfig statisticsConfig,
             ConnectionFactory connectionFactory,
             QueryBuilder queryBuilder,
@@ -209,6 +211,7 @@ public class MySqlClient
         super(config, "`", connectionFactory, queryBuilder, identifierMapping);
         this.jsonType = typeManager.getType(new TypeSignature(StandardTypes.JSON));
         this.statisticsEnabled = statisticsConfig.isEnabled();
+        this.datetimeColumnSize = mySqlConfig.getDatetimeColumnSize();
 
         this.connectorExpressionRewriter = JdbcConnectorExpressionRewriterBuilder.newBuilder()
                 .addStandardRules(this::quoted)
@@ -447,7 +450,7 @@ public class MySqlClient
                 return Optional.of(timeColumnMapping(timeType));
 
             case Types.TIMESTAMP:
-                TimestampType timestampType = createTimestampType(getTimestampPrecision(typeHandle.getRequiredColumnSize()));
+                TimestampType timestampType = createTimestampType(getTimestampPrecision(typeHandle.getColumnSize().orElse(datetimeColumnSize)));
                 return Optional.of(timestampColumnMapping(timestampType));
         }
 
