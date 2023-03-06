@@ -195,6 +195,8 @@ public class MySqlClient
     private final Type jsonType;
     private final boolean statisticsEnabled;
     private final int datetimeColumnSize;
+    private final boolean forceAggregationPushdown;
+    private final boolean forceTopNPushdown;
     private final ConnectorExpressionRewriter<String> connectorExpressionRewriter;
     private final AggregateFunctionRewriter<JdbcExpression, String> aggregateFunctionRewriter;
 
@@ -213,6 +215,8 @@ public class MySqlClient
         this.jsonType = typeManager.getType(new TypeSignature(StandardTypes.JSON));
         this.statisticsEnabled = statisticsConfig.isEnabled();
         this.datetimeColumnSize = mySqlConfig.getDatetimeColumnSize();
+        this.forceAggregationPushdown = mySqlConfig.isForceAggregationPushdown();
+        this.forceTopNPushdown = mySqlConfig.isForceTopNPushdown();
 
         this.connectorExpressionRewriter = JdbcConnectorExpressionRewriterBuilder.newBuilder()
                 .addStandardRules(this::quoted)
@@ -246,6 +250,9 @@ public class MySqlClient
     @Override
     public boolean supportsAggregationPushdown(ConnectorSession session, JdbcTableHandle table, List<AggregateFunction> aggregates, Map<String, ColumnHandle> assignments, List<List<ColumnHandle>> groupingSets)
     {
+        if (forceAggregationPushdown) {
+            return true;
+        }
         // Remote database can be case insensitive.
         return preventTextualTypeAggregationPushdown(groupingSets);
     }
@@ -722,6 +729,9 @@ public class MySqlClient
     @Override
     public boolean supportsTopN(ConnectorSession session, JdbcTableHandle handle, List<JdbcSortItem> sortOrder)
     {
+        if (forceTopNPushdown) {
+            return true;
+        }
         for (JdbcSortItem sortItem : sortOrder) {
             Type sortItemType = sortItem.getColumn().getColumnType();
             if (sortItemType instanceof CharType || sortItemType instanceof VarcharType) {

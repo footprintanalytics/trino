@@ -32,6 +32,9 @@ public class TestMySqlConfig
         assertRecordedDefaults(recordDefaults(MySqlConfig.class)
                 .setAutoReconnect(true)
                 .setMaxReconnects(3)
+                .setDatetimeColumnSize(0)
+                .setForceAggregationPushdown(false)
+                .setForceTopNPushdown(false)
                 .setConnectionTimeout(new Duration(10, TimeUnit.SECONDS))
                 .setDriverUseInformationSchema(true));
     }
@@ -43,12 +46,18 @@ public class TestMySqlConfig
                 .put("mysql.auto-reconnect", "false")
                 .put("mysql.max-reconnects", "4")
                 .put("mysql.connection-timeout", "4s")
+                .put("mysql.force-aggregation-pushdown", "true")
+                .put("mysql.force-topn-pushdown", "true")
+                .put("mysql.datetime-column-size", "23")
                 .put("mysql.jdbc.use-information-schema", "false")
                 .buildOrThrow();
 
         MySqlConfig expected = new MySqlConfig()
                 .setAutoReconnect(false)
                 .setMaxReconnects(4)
+                .setDatetimeColumnSize(23)
+                .setForceAggregationPushdown(true)
+                .setForceTopNPushdown(true)
                 .setConnectionTimeout(new Duration(4, TimeUnit.SECONDS))
                 .setDriverUseInformationSchema(false);
 
