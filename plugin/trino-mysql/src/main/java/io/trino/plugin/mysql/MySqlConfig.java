@@ -25,6 +25,8 @@ public class MySqlConfig
 {
     private boolean autoReconnect = true;
     private int maxReconnects = 3;
+    private boolean forceAggregationPushdown;
+    private boolean forceTopNPushdown;
     private int datetimeColumnSize;
     private Duration connectionTimeout = new Duration(10, TimeUnit.SECONDS);
 
@@ -65,9 +67,34 @@ public class MySqlConfig
 
     @Config("mysql.datetime-column-size")
     @ConfigDescription("Value of datetime columnSize for special db like doris")
-    public void setDatetimeColumnSize(int datetimeColumnSize)
+    public MySqlConfig setDatetimeColumnSize(int datetimeColumnSize)
     {
         this.datetimeColumnSize = datetimeColumnSize;
+        return this;
+    }
+
+    public boolean isForceAggregationPushdown()
+    {
+        return forceAggregationPushdown;
+    }
+
+    @Config("mysql.force-aggregation-pushdown")
+    public MySqlConfig setForceAggregationPushdown(boolean forceAggregationPushdown)
+    {
+        this.forceAggregationPushdown = forceAggregationPushdown;
+        return this;
+    }
+
+    public boolean isForceTopNPushdown()
+    {
+        return forceTopNPushdown;
+    }
+
+    @Config("mysql.force-topn-pushdown")
+    public MySqlConfig setForceTopNPushdown(boolean forceTopNPushdown)
+    {
+        this.forceTopNPushdown = forceTopNPushdown;
+        return this;
     }
 
     public Duration getConnectionTimeout()
